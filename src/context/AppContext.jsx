@@ -152,6 +152,7 @@ export function AppProvider({ children }) {
     sidebarCollapsed,
     collapseSidebar,
     currentClient,
+    selectedClientId: currentClient,
     handleClientChange,
     showNotification,
     branding,

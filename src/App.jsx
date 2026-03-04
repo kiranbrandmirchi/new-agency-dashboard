@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
+import { ensureDashboardPermissions } from './lib/ensurePermissions';
 import { useApp } from './context/AppContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { Login } from './pages/Login';
@@ -8,7 +9,7 @@ import { Signup } from './pages/Signup';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { NotificationContainer } from './components/Notification';
-import { DashboardPage } from './pages/DashboardPage';
+import { CombinedDashboardPage } from './pages/CombinedDashboardPage';
 import { GoogleAdsPage } from './pages/GoogleAdsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
@@ -36,7 +37,7 @@ const PLACEHOLDER_PAGES = {
 function CurrentPage() {
   const { currentPage } = useApp();
 
-  if (currentPage === 'dashboard') return <DashboardPage />;
+  if (currentPage === 'dashboard') return <CombinedDashboardPage />;
   if (currentPage === 'google-ads') return <GoogleAdsPage />;
   if (currentPage === 'settings') return <SettingsPage />;
 
@@ -45,7 +46,7 @@ function CurrentPage() {
     return <PlaceholderPage title={config.title} subtitle={config.subtitle} />;
   }
 
-  return <DashboardPage />;
+  return <CombinedDashboardPage />;
 }
 
 function DashboardLayoutContent() {
@@ -110,6 +111,10 @@ function LoginRedirect({ children }) {
 }
 
 export default function App() {
+  useEffect(() => {
+    ensureDashboardPermissions();
+  }, []);
+
   return (
     <BrowserRouter>
       <Routes>
@@ -128,6 +133,7 @@ export default function App() {
             <DashboardLayout />
           </ProtectedRoute>
         } />
+        <Route path="/dashboard" element={<Navigate to="/" replace />} />
         <Route path="/admin" element={
           <ProtectedRoute>
             <DashboardLayout />

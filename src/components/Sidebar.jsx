@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { PermissionGate } from './PermissionGate';
 
 const NAV_ITEMS = [
-  { id: 'dashboard', label: 'Executive Dashboard', icon: '📊', section: 'Overview', permission: 'sidebar.dashboard' },
+  { id: 'dashboard', label: 'Dashboard', icon: '📊', section: 'Overview', permission: 'tab.combined_dashboard' },
   {
     id: 'google-ads', label: 'Google Ads', section: 'Ad Platforms',
     permission: 'sidebar.google_ads',
@@ -30,11 +30,6 @@ const NAV_ITEMS = [
     id: 'reddit-ads', label: 'Reddit Ads', section: 'Ad Platforms',
     permission: 'sidebar.reddit_ads',
     logo: <svg viewBox="0 0 24 24" width="16" height="16"><circle cx="12" cy="12" r="10" fill="#FF4500"/><path d="M16.67 13.38c.03.16.05.33.05.5 0 2.56-2.98 4.63-6.67 4.63-3.69 0-6.67-2.07-6.67-4.63 0-.17.02-.34.05-.5a1.5 1.5 0 01-.6-1.2 1.52 1.52 0 012.75-.88c1.2-.81 2.84-1.33 4.63-1.4l.87-4.1a.3.3 0 01.36-.24l2.9.62a1.07 1.07 0 112.02.18l-2.7-.58-.78 3.7c1.77.07 3.38.59 4.57 1.4a1.52 1.52 0 012.75.88c0 .47-.22.9-.57 1.18zM8.17 13.38a1.25 1.25 0 100 2.5 1.25 1.25 0 000-2.5zm5.92 2.5a1.25 1.25 0 100-2.5 1.25 1.25 0 000 2.5zm-.4 1.46c-.96.72-2.2 1.03-3.6 1.03-1.4 0-2.64-.31-3.6-1.03a.3.3 0 01.4-.44c.81.6 1.88.91 3.2.91s2.39-.31 3.2-.91a.3.3 0 01.4.44z" fill="#fff"/></svg>,
-  },
-  {
-    id: 'amazon-ads', label: 'Amazon Ads', section: 'Ad Platforms',
-    permission: 'sidebar.amazon_ads',
-    logo: <svg viewBox="0 0 24 24" width="16" height="16"><path d="M14.43 16.7c-4.1 3.04-10.06 4.66-15.18 4.66C-.18 21.36.08 21.1.33 20.84c4.69-4 10.48-6.4 16.45-6.4 2.4 0 4.93.5 7.3 1.51.36.16.06.39-.19.37a23.16 23.16 0 00-9.46.38z" fill="#FF9900"/><path d="M6.5 12.07c0-1.04.08-1.87.24-2.51a5.06 5.06 0 01.74-1.72 3.19 3.19 0 011.28-1.02A4.22 4.22 0 0110.46 6.4c.64 0 1.2.06 1.68.19.48.13.94.33 1.38.62v-.61c0-.97-.2-1.65-.62-2.06-.41-.41-1.07-.61-1.97-.61-.44 0-.91.06-1.41.19a10.6 10.6 0 00-1.54.55l-.48-1.94c.58-.28 1.2-.5 1.86-.65.66-.16 1.3-.24 1.9-.24 1.61 0 2.78.4 3.52 1.19s1.1 2 1.1 3.62v7.1h-2.14l-.21-1.3h-.07a5.08 5.08 0 01-1.52 1.14c-.58.29-1.23.43-1.93.43-1.14 0-2.03-.35-2.67-1.06-.64-.7-.96-1.7-.96-2.99zm2.44-.18c0 .76.17 1.34.51 1.73.34.39.82.59 1.44.59.52 0 .99-.14 1.4-.43.41-.29.76-.65 1.04-1.1V10.2a3.97 3.97 0 00-1.22-.52 4.78 4.78 0 00-1.18-.15c-.72 0-1.26.26-1.63.77-.37.51-.55 1.14-.55 1.87l.19-.28z" fill="#fff"/></svg>,
   },
   {
     id: 'dsp', label: 'DSP (TTD / DV360)', section: 'Programmatic & CTV',
@@ -92,7 +87,7 @@ const sections = groupBySection(NAV_ITEMS);
 export function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { currentPage, showPage, sidebarOpen, sidebarCollapsed, branding, currentClient, handleClientChange, clients } = useApp();
+  const { currentPage, showPage, sidebarOpen, sidebarCollapsed } = useApp();
   const { hasPermission } = useAuth();
   const isAdmin = location.pathname === '/admin';
 
@@ -157,17 +152,6 @@ export function Sidebar() {
           </ul>
         </div>
       )}
-      <div className="sidebar-footer">
-        <select
-          className="client-selector"
-          value={currentClient || 'Select Client...'}
-          onChange={(e) => handleClientChange(e.target.value)}
-        >
-          {clients.map((c) => (
-            <option key={c} value={c}>{c}</option>
-          ))}
-        </select>
-      </div>
     </aside>
   );
 }
