@@ -6,6 +6,7 @@ import { useApp } from './context/AppContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { Login } from './pages/Login';
 import { Signup } from './pages/Signup';
+import { OAuthCallback } from './pages/OAuthCallback';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { NotificationContainer } from './components/Notification';
@@ -128,6 +129,7 @@ export default function App() {
             <Signup />
           </LoginRedirect>
         } />
+        <Route path="/oauth/callback" element={<OAuthCallback />} />
         <Route path="/" element={
           <ProtectedRoute>
             <DashboardLayout />

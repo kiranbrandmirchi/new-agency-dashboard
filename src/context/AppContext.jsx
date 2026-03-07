@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { PAGE_TITLES, CLIENTS } from '../data/staticData';
+import { PAGE_TITLES } from '../data/staticData';
+import { useAuth } from './AuthContext';
 
 const STORAGE_KEYS = {
   agencyName: 'agencyName',
@@ -32,6 +33,7 @@ const AppContext = createContext(null);
 
 export function AppProvider({ children }) {
   migrateBrand();
+  const { allowedClientAccounts } = useAuth();
 
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -68,13 +70,6 @@ export function AppProvider({ children }) {
   const toggleSidebar = useCallback(() => setSidebarOpen((o) => !o), []);
   const collapseSidebar = useCallback(() => setSidebarCollapsed((c) => !c), []);
 
-  const handleClientChange = useCallback((value) => {
-    setCurrentClient(value === 'Select Client...' ? null : value);
-    if (value && value !== 'Select Client...') {
-      showNotification('Client switched to: ' + value);
-    }
-  }, []);
-
   const showNotification = useCallback((message, duration = 3000) => {
     const id = Date.now();
     setNotifications((prev) => [...prev, { id, message, duration }]);
@@ -82,6 +77,15 @@ export function AppProvider({ children }) {
       setNotifications((prev) => prev.filter((n) => n.id !== id));
     }, duration);
   }, []);
+
+  const handleClientChange = useCallback((value) => {
+    const v = value === '' || value === 'Select Client...' ? null : value;
+    setCurrentClient(v);
+    if (v) {
+      const acc = (allowedClientAccounts || []).find((a) => String(a.platform_customer_id) === String(v));
+      showNotification('Account switched to: ' + (acc?.account_name || acc?.client_name || v));
+    }
+  }, [showNotification, allowedClientAccounts]);
 
   const updateBranding = useCallback((agencyName, agencyLogo) => {
     setBranding({ agencyName: agencyName || branding.agencyName, agencyLogo: agencyLogo ?? branding.agencyLogo });
@@ -160,7 +164,13 @@ export function AppProvider({ children }) {
     colors,
     updateColors,
     resetSettings,
-    clients: ['Select Client...', ...CLIENTS],
+    clients: [
+      { id: null, name: 'Select Client...' },
+      ...(allowedClientAccounts || []).map((a) => ({
+        id: a.platform_customer_id,
+        name: a.account_name || a.client_name || a.platform_customer_id,
+      })),
+    ],
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

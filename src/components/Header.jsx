@@ -6,7 +6,7 @@ import { PermissionGate } from './PermissionGate';
 export function Header() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { headerTitle, toggleSidebar, sidebarCollapsed, collapseSidebar, showNotification } = useApp();
+  const { headerTitle, toggleSidebar, sidebarCollapsed, collapseSidebar, showNotification, clients, currentClient, handleClientChange } = useApp();
   const displayTitle = location.pathname === '/admin' ? 'Admin Panel' : headerTitle;
   const { signOut, userName, userEmail } = useAuth();
 
@@ -58,6 +58,18 @@ export function Header() {
       </div>
       <div className="header-right">
         <div className="header-filters" id="headerFilters">
+          {clients?.length > 2 && (
+            <select
+              className="client-selector"
+              value={currentClient ?? ''}
+              onChange={(e) => handleClientChange(e.target.value)}
+              title="Select account"
+            >
+              {clients.map((c) => (
+                <option key={c.id ?? 'all'} value={c.id ?? ''}>{c.name}</option>
+              ))}
+            </select>
+          )}
           <span id="sb-sync-badge" style={{ color: 'var(--accent)', fontSize: 11, fontWeight: 600 }}>Live</span>
         </div>
         <PermissionGate permission="action.export_pdf">

@@ -85,31 +85,26 @@ export function useCombinedDashboardData() {
       if (canViewAllCustomers) {
         const { data: cpaData } = await supabase
           .from('client_platform_accounts')
-          .select('client_id,platform_customer_id,account_name')
-          .eq('platform', 'google_ads');
-        const { data: mcData } = await supabase.from('master_clients').select('id,client_name');
-        const mcMap = new Map((mcData || []).map((c) => [c.id, c.client_name]));
-        const byClient = new Map();
+          .select('id,platform_customer_id,account_name')
+          .eq('platform', 'google_ads')
+          .eq('is_active', true);
         (cpaData || []).forEach((r) => {
           const cid = String(r.platform_customer_id);
-          const name = mcMap.get(r.client_id) || r.client_id;
-          const acc = { customer_id: cid, client_id: r.client_id, client_name: name, account_name: r.account_name };
-          accountList.push(acc);
-          if (!byClient.has(r.client_id)) byClient.set(r.client_id, []);
-          byClient.get(r.client_id).push(cid);
+          const name = r.account_name || cid;
+          accountList.push({ customer_id: cid, client_id: cid, client_name: name, account_name: r.account_name });
         });
         if (selectedClientId) {
-          customerIds = byClient.get(selectedClientId) || [];
-          accountList = accountList.filter((a) => a.client_id === selectedClientId);
+          customerIds = [selectedClientId];
+          accountList = accountList.filter((a) => String(a.customer_id) === String(selectedClientId));
         } else {
           customerIds = [...new Set(accountList.map((a) => a.customer_id))];
         }
       } else {
         const gads = (allowedClientAccounts || []).filter((a) => a.platform === 'google_ads');
         if (selectedClientId) {
-          accountList = gads.filter((a) => a.client_id === selectedClientId).map((a) => ({
+          accountList = gads.filter((a) => String(a.platform_customer_id) === String(selectedClientId)).map((a) => ({
             customer_id: String(a.platform_customer_id),
-            client_name: a.client_name,
+            client_name: a.client_name || a.account_name,
             account_name: a.account_name,
           }));
         } else {

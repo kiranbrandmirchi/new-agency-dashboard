@@ -61,8 +61,13 @@ export function Login() {
             {submitting ? 'Signing in…' : 'Sign In'}
           </button>
           {error && (
-            <div className="auth-error" role="alert">
+            <div className="auth-error" role="alert" style={{ marginTop: 12 }}>
               {error}
+              {error.toLowerCase().includes('invalid') && (
+                <p style={{ marginTop: 8, fontSize: 13, opacity: 0.9 }}>
+                  Check your email and password, or <Link to="/signup">sign up</Link> if you don&apos;t have an account.
+                </p>
+              )}
             </div>
           )}
           <p className="auth-switch">

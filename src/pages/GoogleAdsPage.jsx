@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useGoogleAdsData } from '../hooks/useGoogleAdsData';
+import { useAgencyReportTabs } from '../hooks/useAgencyReportTabs';
 import { useAuth } from '../context/AuthContext';
 import { formatCurrency2, formatNumber, formatDec } from '../utils/format';
 import { DateRangePicker } from '../components/DatePicker';
@@ -12,16 +13,6 @@ const fR = (n) => Number(n || 0).toFixed(2) + 'x';
 
 const PG = 50;
 
-const TABS = [
-  { id: 'daily', label: 'Daily Breakdown', permission: 'tab.daily_breakdown' },
-  { id: 'campaigntypes', label: 'Campaign Types', permission: 'tab.overview' },
-  { id: 'campaigns', label: 'Campaigns', permission: 'tab.campaigns' },
-  { id: 'adgroups', label: 'Ad Groups', permission: 'tab.ad_groups' },
-  { id: 'keywords', label: 'Keywords', permission: 'tab.keywords' },
-  { id: 'searchterms', label: 'Search Terms', permission: 'tab.search_terms' },
-  { id: 'geo', label: 'Geo', permission: 'tab.geo' },
-  { id: 'conversions', label: 'Conversions', permission: 'tab.conversions' },
-];
 
 const CHART_METRICS = [
   { key: 'cost',        label: 'Cost',       fmt: fU, color: '#E12627', axis: 'left' },
@@ -141,9 +132,10 @@ function SortTh({ label, col, sort, onSort, align }) {
 /* ──────────────── MAIN COMPONENT ──────────────── */
 export function GoogleAdsPage() {
   const { hasPermission } = useAuth();
+  const { tabs: configuredTabs } = useAgencyReportTabs('google_ads');
   const { filters, updateFilter, batchUpdateFilters, fetchData, loading, error, customers, channelTypes, showAllClientsOption, kpis, compareKpis, campaignTypes, campaigns, adGroups, keywords, searchTerms, geoData, conversionsData, dailyTrends, compareDailyTrends, dailyBreakdown } = useGoogleAdsData();
 
-  const permittedTabs = TABS.filter((t) => hasPermission(t.permission));
+  const permittedTabs = configuredTabs.filter((t) => !t.permission || hasPermission(t.permission));
   const defaultTab = permittedTabs[0]?.id || 'daily';
 
   const [activeTab, setActiveTab] = useState(defaultTab);

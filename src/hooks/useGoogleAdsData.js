@@ -114,23 +114,24 @@ export function useGoogleAdsData() {
 
       if (!optionsLoaded.current) {
         if (canViewAllCustomers) {
-          const [mcRes, cpaRes] = await Promise.all([
-            supabase.from('master_clients').select('id,client_name,client_code').eq('is_active', true).order('client_name'),
-            supabase.from('client_platform_accounts').select('client_id,platform_customer_id').eq('platform', 'google_ads'),
-          ]);
-          const mcData = mcRes.data || [];
-          const cpaData = cpaRes.data || [];
-          if (mcRes.error) console.warn('[GAds] master_clients error:', mcRes.error);
-          if (cpaRes.error) console.warn('[GAds] client_platform_accounts error:', cpaRes.error);
+          const { data: cpaData, error: cpaErr } = await supabase
+            .from('client_platform_accounts')
+            .select('id,platform_customer_id,account_name')
+            .eq('platform', 'google_ads')
+            .eq('is_active', true);
+          if (cpaErr) console.warn('[GAds] client_platform_accounts error:', cpaErr);
           const map = new Map();
           (cpaData || []).forEach((r) => {
-            if (!map.has(r.client_id)) map.set(r.client_id, []);
-            map.get(r.client_id).push(String(r.platform_customer_id));
+            const cid = String(r.platform_customer_id);
+            if (!map.has(cid)) map.set(cid, [cid]);
           });
           clientIdToPlatformIds.current = map;
-          const options = [{ id: 'ALL', name: 'All Clients' }];
-          (mcData || []).forEach((c) => {
-            options.push({ id: c.id, name: c.client_name });
+          const options = [{ id: 'ALL', name: 'All Accounts' }];
+          (cpaData || []).forEach((c) => {
+            options.push({
+              id: String(c.platform_customer_id),
+              name: c.account_name || c.platform_customer_id,
+            });
           });
           setClientOptions(options);
         } else {
@@ -196,11 +197,6 @@ export function useGoogleAdsData() {
         if (cid === '__NONE__') return { customerIds: [NO_MATCH_ID] };
         if (cid === 'ALL_MINE') {
           const ids = (allowedClientAccounts || []).filter((a) => a.platform === 'google_ads').map((a) => a.platform_customer_id);
-          return ids.length ? { customerIds: ids } : { customerIds: [NO_MATCH_ID] };
-        }
-        const isClientId = typeof cid === 'string' && cid.includes('-') && cid.length > 10;
-        if (isClientId) {
-          const ids = clientIdToPlatformIds.current.get(cid) || [];
           return ids.length ? { customerIds: ids } : { customerIds: [NO_MATCH_ID] };
         }
         return { customerId: cid };
