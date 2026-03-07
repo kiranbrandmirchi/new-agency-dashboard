@@ -15,39 +15,32 @@ export function SettingsPage() {
   const [loadingAccounts, setLoadingAccounts] = useState(true);
   const [disconnecting, setDisconnecting] = useState(null);
   const [togglingAccount, setTogglingAccount] = useState(null);
+  const [syncingAccount, setSyncingAccount] = useState(null);
+  const [syncingAll, setSyncingAll] = useState(false);
 
   const [agencyForm, setAgencyForm] = useState({
-    agency_name: '',
-    primary_color: '',
-    secondary_color: '',
-    accent_color: '',
-    sidebar_bg: '',
-    sidebar_text: '',
-    font_family: '',
-    logo_url: '',
+    agency_name: '', primary_color: '', secondary_color: '', accent_color: '',
+    sidebar_bg: '', sidebar_text: '', font_family: '', logo_url: '',
   });
   const [savingAgency, setSavingAgency] = useState(false);
 
   const isAdmin = ['super_admin', 'admin'].includes(userRole?.toLowerCase());
-
-  const redirectUri = typeof window !== 'undefined' ? `${window.location.origin}/oauth/callback` : 'http://localhost:5173/oauth/callback';
+  const redirectUri = typeof window !== 'undefined'
+    ? `${window.location.origin}/oauth/callback`
+    : 'http://localhost:5173/oauth/callback';
 
   const fetchCredentials = useCallback(async () => {
     if (!agencyId) return;
     setLoadingCreds(true);
     try {
       const { data, error } = await supabase
-        .from('agency_platform_credentials')
-        .select('*')
-        .eq('agency_id', agencyId);
+        .from('agency_platform_credentials').select('*').eq('agency_id', agencyId);
       if (error) throw error;
       setCredentials(data || []);
     } catch (err) {
       console.warn('[Settings] credentials error:', err);
       setCredentials([]);
-    } finally {
-      setLoadingCreds(false);
-    }
+    } finally { setLoadingCreds(false); }
   }, [agencyId]);
 
   const fetchAccounts = useCallback(async () => {
@@ -55,27 +48,17 @@ export function SettingsPage() {
     setLoadingAccounts(true);
     try {
       const { data, error } = await supabase
-        .from('client_platform_accounts')
-        .select('*')
-        .eq('agency_id', agencyId)
-        .order('account_name');
+        .from('client_platform_accounts').select('*').eq('agency_id', agencyId).order('account_name');
       if (error) throw error;
       setAccounts(data || []);
     } catch (err) {
       console.warn('[Settings] accounts error:', err);
       setAccounts([]);
-    } finally {
-      setLoadingAccounts(false);
-    }
+    } finally { setLoadingAccounts(false); }
   }, [agencyId]);
 
-  useEffect(() => {
-    fetchCredentials();
-  }, [fetchCredentials]);
-
-  useEffect(() => {
-    fetchAccounts();
-  }, [fetchAccounts]);
+  useEffect(() => { fetchCredentials(); }, [fetchCredentials]);
+  useEffect(() => { fetchAccounts(); }, [fetchAccounts]);
 
   useEffect(() => {
     if (agency) {
@@ -92,29 +75,99 @@ export function SettingsPage() {
     }
   }, [agency]);
 
-  const handleConnectGoogleAds = async () => {
+  // ── Sync a single account ──
+  const handleSyncAccount = async (account) => {
+    setSyncingAccount(account.id);
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        showNotification('Please sign in first.');
-        return;
-      }
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/oauth-connect`, {
+      if (!session) { showNotification('Please sign in first.'); return; }
+
+      const now = new Date();
+      const from = new Date(now);
+      from.setDate(from.getDate() - 90);
+
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/gads-full-sync`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({
-          action: 'get_auth_url',
-          platform: 'google_ads',
-          redirect_uri: redirectUri,
+          platform_customer_id: account.platform_customer_id,
+          agency_id: agencyId,
+          date_from: from.toISOString().slice(0, 10),
+          date_to: now.toISOString().slice(0, 10),
         }),
       });
       const data = await res.json();
-      if (!res.ok || !data.auth_url) {
-        throw new Error(data.error || data.message || 'Failed to get auth URL');
+      if (!res.ok) throw new Error(data.error || 'Sync failed');
+      showNotification(`Synced ${account.account_name}: ${(data.log || []).join(', ')}`);
+      await fetchAccounts();
+    } catch (err) {
+      showNotification(err.message || 'Sync failed');
+    } finally {
+      setSyncingAccount(null);
+    }
+  };
+
+  // ── Sync ALL active accounts ──
+  const handleSyncAll = async () => {
+    const activeAccounts = accounts.filter((a) => a.is_active && a.platform === 'google_ads');
+    if (activeAccounts.length === 0) {
+      showNotification('No active Google Ads accounts to sync.');
+      return;
+    }
+    setSyncingAll(true);
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const account of activeAccounts) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) break;
+
+        const now = new Date();
+        const from = new Date(now);
+        from.setDate(from.getDate() - 90);
+
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/gads-full-sync`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            platform_customer_id: account.platform_customer_id,
+            agency_id: agencyId,
+            date_from: from.toISOString().slice(0, 10),
+            date_to: now.toISOString().slice(0, 10),
+          }),
+        });
+        if (res.ok) successCount++;
+        else failCount++;
+      } catch {
+        failCount++;
       }
+    }
+    showNotification(`Sync complete: ${successCount} succeeded, ${failCount} failed`);
+    await fetchAccounts();
+    setSyncingAll(false);
+  };
+
+  const handleConnectGoogleAds = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { showNotification('Please sign in first.'); return; }
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/oauth-connect`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ action: 'get_auth_url', platform: 'google_ads', redirect_uri: redirectUri }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.auth_url) throw new Error(data.error || data.message || 'Failed to get auth URL');
       window.location.href = data.auth_url;
     } catch (err) {
       showNotification(err.message || 'Failed to connect');
@@ -135,75 +188,58 @@ export function SettingsPage() {
         body: JSON.stringify({ action: 'disconnect', platform }),
       });
       const data = await res.json();
-      if (!res.ok && !data.success) {
-        throw new Error(data.error || 'Disconnect failed');
-      }
+      if (!res.ok && !data.success) throw new Error(data.error || 'Disconnect failed');
       await fetchCredentials();
       showNotification('Disconnected');
     } catch (err) {
       showNotification(err.message || 'Failed to disconnect');
-    } finally {
-      setDisconnecting(null);
-    }
+    } finally { setDisconnecting(null); }
   };
 
   const handleToggleAccount = async (account) => {
     setTogglingAccount(account.id);
     try {
       const { error } = await supabase
-        .from('client_platform_accounts')
-        .update({ is_active: !account.is_active })
-        .eq('id', account.id);
+        .from('client_platform_accounts').update({ is_active: !account.is_active }).eq('id', account.id);
       if (error) throw error;
       await fetchAccounts();
       showNotification(account.is_active ? 'Account deactivated' : 'Account activated');
     } catch (err) {
       showNotification(err.message || 'Failed to update');
-    } finally {
-      setTogglingAccount(null);
-    }
+    } finally { setTogglingAccount(null); }
   };
 
   const handleSaveAgency = async () => {
     if (!agency?.id) return;
     setSavingAgency(true);
     try {
-      const { error } = await supabase
-        .from('agencies')
-        .update({
-          agency_name: agencyForm.agency_name,
-          primary_color: agencyForm.primary_color || null,
-          secondary_color: agencyForm.secondary_color || null,
-          accent_color: agencyForm.accent_color || null,
-          sidebar_bg: agencyForm.sidebar_bg || null,
-          sidebar_text: agencyForm.sidebar_text || null,
-          font_family: agencyForm.font_family || null,
-          logo_url: agencyForm.logo_url || null,
-        })
-        .eq('id', agency.id);
+      const { error } = await supabase.from('agencies').update({
+        agency_name: agencyForm.agency_name,
+        primary_color: agencyForm.primary_color || null,
+        secondary_color: agencyForm.secondary_color || null,
+        accent_color: agencyForm.accent_color || null,
+        sidebar_bg: agencyForm.sidebar_bg || null,
+        sidebar_text: agencyForm.sidebar_text || null,
+        font_family: agencyForm.font_family || null,
+        logo_url: agencyForm.logo_url || null,
+      }).eq('id', agency.id);
       if (error) throw error;
       const root = document.documentElement;
-      if (agencyForm.primary_color) root.style.setProperty('--primary-color', agencyForm.primary_color);
-      if (agencyForm.primary_color) root.style.setProperty('--primary', agencyForm.primary_color);
-      if (agencyForm.accent_color) root.style.setProperty('--accent-color', agencyForm.accent_color);
-      if (agencyForm.accent_color) root.style.setProperty('--accent', agencyForm.accent_color);
+      if (agencyForm.primary_color) { root.style.setProperty('--primary-color', agencyForm.primary_color); root.style.setProperty('--primary', agencyForm.primary_color); }
+      if (agencyForm.accent_color) { root.style.setProperty('--accent-color', agencyForm.accent_color); root.style.setProperty('--accent', agencyForm.accent_color); }
       if (agencyForm.sidebar_bg) root.style.setProperty('--sidebar-bg', agencyForm.sidebar_bg);
       if (agencyForm.sidebar_text) root.style.setProperty('--sidebar-text', agencyForm.sidebar_text);
       if (agencyForm.font_family) root.style.setProperty('--font-family', agencyForm.font_family);
       showNotification('Branding saved');
     } catch (err) {
       showNotification(err.message || 'Failed to save');
-    } finally {
-      setSavingAgency(false);
-    }
+    } finally { setSavingAgency(false); }
   };
 
-  const handleSignOut = async () => {
-    await signOut();
-    window.location.href = '/login';
-  };
+  const handleSignOut = async () => { await signOut(); window.location.href = '/login'; };
 
   const gadsCred = credentials.find((c) => c.platform === 'google_ads');
+  const activeGadsAccounts = accounts.filter((a) => a.is_active && a.platform === 'google_ads');
 
   return (
     <div className="page-section active" id="page-settings">
@@ -213,10 +249,11 @@ export function SettingsPage() {
           <p>Manage platform connections, accounts, and agency branding</p>
         </div>
 
+        {/* Platform Connections */}
         <div className="settings-section">
           <h3>Platform Connections</h3>
           {loadingCreds ? (
-            <p style={{ color: 'var(--text-muted)' }}>Loading…</p>
+            <p style={{ color: 'var(--text-muted)' }}>Loading</p>
           ) : (
             <div className="settings-form-group">
               <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
@@ -227,20 +264,13 @@ export function SettingsPage() {
                   </span>
                 </div>
                 {gadsCred ? (
-                  <button
-                    type="button"
-                    className="btn btn-outline btn-sm"
+                  <button type="button" className="btn btn-outline btn-sm"
                     onClick={() => handleDisconnect('google_ads')}
-                    disabled={disconnecting === 'google_ads'}
-                  >
+                    disabled={disconnecting === 'google_ads'}>
                     {disconnecting === 'google_ads' ? 'Disconnecting…' : 'Disconnect'}
                   </button>
                 ) : (
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    onClick={handleConnectGoogleAds}
-                  >
+                  <button type="button" className="btn btn-primary" onClick={handleConnectGoogleAds}>
                     Connect Google Ads
                   </button>
                 )}
@@ -249,15 +279,31 @@ export function SettingsPage() {
           )}
         </div>
 
+        {/* Account Management */}
         <div className="settings-section">
-          <h3>Account Management</h3>
-          <p className="help-text">Google Ads accounts linked to your agency. Toggle to enable or disable reporting.</p>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+            <div>
+              <h3 style={{ margin: 0 }}>Account Management</h3>
+              <p className="help-text" style={{ margin: '4px 0 0' }}>
+                Google Ads accounts linked to your agency. Toggle to enable or disable reporting.
+              </p>
+            </div>
+            {activeGadsAccounts.length > 0 && (
+              <button type="button" className="btn btn-primary btn-sm" onClick={handleSyncAll}
+                disabled={syncingAll}>
+                {syncingAll ? 'Syncing All…' : `Sync All Accounts (${activeGadsAccounts.length})`}
+              </button>
+            )}
+          </div>
+
           {loadingAccounts ? (
-            <p style={{ color: 'var(--text-muted)' }}>Loading…</p>
+            <p style={{ color: 'var(--text-muted)' }}>Loading</p>
           ) : accounts.length === 0 ? (
-            <p style={{ color: 'var(--text-muted)' }}>No accounts yet. Connect Google Ads above and complete the OAuth flow to add accounts.</p>
+            <p style={{ color: 'var(--text-muted)' }}>
+              No accounts yet. Connect Google Ads above and complete the OAuth flow to add accounts.
+            </p>
           ) : (
-            <div className="panel">
+            <div className="panel" style={{ marginTop: 12 }}>
               <div className="panel-body no-padding">
                 <table className="data-table">
                   <thead>
@@ -267,24 +313,36 @@ export function SettingsPage() {
                       <th>Last Sync</th>
                       <th>Status</th>
                       <th>Active</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {accounts.map((acc) => (
                       <tr key={acc.id}>
-                        <td>{acc.account_name || '—'}</td>
+                        <td>{acc.account_name || ''}</td>
                         <td>{acc.platform_customer_id}</td>
-                        <td>{acc.last_sync_at ? new Date(acc.last_sync_at).toLocaleString() : '—'}</td>
-                        <td><span className="badge badge-blue">{acc.sync_status || '—'}</span></td>
+                        <td>{acc.last_sync_at ? new Date(acc.last_sync_at).toLocaleString() : 'Never'}</td>
                         <td>
-                          <button
-                            type="button"
+                          <span className={`badge ${acc.sync_status === 'synced' ? 'badge-green' : 'badge-gray'}`}>
+                            {acc.sync_status || 'pending'}
+                          </span>
+                        </td>
+                        <td>
+                          <button type="button"
                             className={`btn btn-sm ${acc.is_active ? 'btn-outline' : 'btn-primary'}`}
                             onClick={() => handleToggleAccount(acc)}
-                            disabled={togglingAccount === acc.id}
-                          >
+                            disabled={togglingAccount === acc.id}>
                             {togglingAccount === acc.id ? '…' : acc.is_active ? 'Deactivate' : 'Activate'}
                           </button>
+                        </td>
+                        <td>
+                          {acc.is_active && acc.platform === 'google_ads' && (
+                            <button type="button" className="btn btn-accent btn-sm"
+                              onClick={() => handleSyncAccount(acc)}
+                              disabled={syncingAccount === acc.id || syncingAll}>
+                              {syncingAccount === acc.id ? 'Syncing…' : 'Sync Now'}
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -295,92 +353,50 @@ export function SettingsPage() {
           )}
         </div>
 
+        {/* Agency Branding */}
         {isAdmin && agency && (
           <div className="settings-section">
             <h3>Agency Branding</h3>
             <div className="settings-form-group">
               <label>Agency Name</label>
-              <input
-                type="text"
-                value={agencyForm.agency_name}
-                onChange={(e) => setAgencyForm((f) => ({ ...f, agency_name: e.target.value }))}
-              />
+              <input type="text" value={agencyForm.agency_name}
+                onChange={(e) => setAgencyForm((f) => ({ ...f, agency_name: e.target.value }))} />
             </div>
             <div className="color-swatches" style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 16 }}>
-              <div className="color-swatch">
-                <input
-                  type="color"
-                  value={agencyForm.primary_color || '#E12627'}
-                  onChange={(e) => setAgencyForm((f) => ({ ...f, primary_color: e.target.value }))}
-                />
-                <span>Primary</span>
-              </div>
-              <div className="color-swatch">
-                <input
-                  type="color"
-                  value={agencyForm.secondary_color || '#666'}
-                  onChange={(e) => setAgencyForm((f) => ({ ...f, secondary_color: e.target.value }))}
-                />
-                <span>Secondary</span>
-              </div>
-              <div className="color-swatch">
-                <input
-                  type="color"
-                  value={agencyForm.accent_color || '#0083CB'}
-                  onChange={(e) => setAgencyForm((f) => ({ ...f, accent_color: e.target.value }))}
-                />
-                <span>Accent</span>
-              </div>
-              <div className="color-swatch">
-                <input
-                  type="color"
-                  value={agencyForm.sidebar_bg || '#1a1a2e'}
-                  onChange={(e) => setAgencyForm((f) => ({ ...f, sidebar_bg: e.target.value }))}
-                />
-                <span>Sidebar BG</span>
-              </div>
-              <div className="color-swatch">
-                <input
-                  type="color"
-                  value={agencyForm.sidebar_text || '#fff'}
-                  onChange={(e) => setAgencyForm((f) => ({ ...f, sidebar_text: e.target.value }))}
-                />
-                <span>Sidebar Text</span>
-              </div>
+              {[
+                ['primary_color', 'Primary', '#E12627'],
+                ['secondary_color', 'Secondary', '#666'],
+                ['accent_color', 'Accent', '#0083CB'],
+                ['sidebar_bg', 'Sidebar BG', '#1a1a2e'],
+                ['sidebar_text', 'Sidebar Text', '#fff'],
+              ].map(([key, label, fallback]) => (
+                <div className="color-swatch" key={key}>
+                  <input type="color" value={agencyForm[key] || fallback}
+                    onChange={(e) => setAgencyForm((f) => ({ ...f, [key]: e.target.value }))} />
+                  <span>{label}</span>
+                </div>
+              ))}
             </div>
             <div className="settings-form-group">
               <label>Font Family</label>
-              <input
-                type="text"
-                value={agencyForm.font_family}
+              <input type="text" value={agencyForm.font_family}
                 onChange={(e) => setAgencyForm((f) => ({ ...f, font_family: e.target.value }))}
-                placeholder="e.g. Inter, sans-serif"
-              />
+                placeholder="e.g. Inter, sans-serif" />
             </div>
             <div className="settings-form-group">
               <label>Logo URL</label>
-              <input
-                type="text"
-                value={agencyForm.logo_url}
+              <input type="text" value={agencyForm.logo_url}
                 onChange={(e) => setAgencyForm((f) => ({ ...f, logo_url: e.target.value }))}
-                placeholder="https://..."
-              />
+                placeholder="https://..." />
             </div>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={handleSaveAgency}
-              disabled={savingAgency}
-            >
+            <button type="button" className="btn btn-primary" onClick={handleSaveAgency} disabled={savingAgency}>
               {savingAgency ? 'Saving…' : 'Save Branding'}
             </button>
           </div>
         )}
 
         <div style={{ marginTop: 32 }}>
-          <button type="button" className="btn btn-outline" onClick={handleSignOut}>
-            Sign out
-          </button>
+          <button type="button" className="btn btn-outline" onClick={handleSignOut}>Sign out</button>
         </div>
       </div>
     </div>
