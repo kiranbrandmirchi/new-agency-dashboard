@@ -93,15 +93,19 @@ export function SettingsPage() {
           'Authorization': `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({
-          customer_id: account.customer_id,
+          customer_id: account.platform_customer_id,
           agency_id: agencyId,
           date_from: from.toISOString().slice(0, 10),
           date_to: now.toISOString().slice(0, 10),
+          mode: 'backfill',
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Sync failed');
-      showNotification(`Synced ${account.account_name}: ${(data.log || []).join(', ')}`);
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        const errText = data?.error || await res.text().catch(() => 'Sync failed');
+        throw new Error(typeof errText === 'string' ? errText : 'Sync failed');
+      }
+      showNotification(`Synced ${account.account_name || account.platform_customer_id} successfully`);
       await fetchAccounts();
     } catch (err) {
       showNotification(err.message || 'Sync failed');
@@ -137,10 +141,11 @@ export function SettingsPage() {
             'Authorization': `Bearer ${session.access_token}`,
           },
           body: JSON.stringify({
-            customer_id: account.customer_id,
+            customer_id: account.platform_customer_id,
             agency_id: agencyId,
             date_from: from.toISOString().slice(0, 10),
             date_to: now.toISOString().slice(0, 10),
+            mode: 'backfill',
           }),
         });
         if (res.ok) successCount++;
@@ -320,7 +325,7 @@ export function SettingsPage() {
                     {accounts.map((acc) => (
                       <tr key={acc.id}>
                         <td>{acc.account_name || ''}</td>
-                        <td>{acc.customer_id}</td>
+                        <td>{acc.platform_customer_id}</td>
                         <td>{acc.last_sync_at ? new Date(acc.last_sync_at).toLocaleString() : 'Never'}</td>
                         <td>
                           <span className={`badge ${acc.sync_status === 'synced' ? 'badge-green' : 'badge-gray'}`}>
