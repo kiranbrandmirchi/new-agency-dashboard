@@ -84,7 +84,7 @@ export function SettingsPage() {
 
       const now = new Date();
       const from = new Date(now);
-      from.setDate(from.getDate() - 90);
+      from.setDate(from.getDate() - 5);
 
       const res = await fetch(`${SUPABASE_URL}/functions/v1/gads-full-sync`, {
         method: 'POST',
@@ -132,7 +132,7 @@ export function SettingsPage() {
 
         const now = new Date();
         const from = new Date(now);
-        from.setDate(from.getDate() - 90);
+        from.setDate(from.getDate() - 5);
 
         const res = await fetch(`${SUPABASE_URL}/functions/v1/gads-full-sync`, {
           method: 'POST',
