@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import { useAuth } from '../context/AuthContext';
 
 const ADMIN_TABS = [
   { id: 'users', label: 'Users' },
@@ -12,6 +13,7 @@ const PLATFORMS = ['google_ads', 'facebook_ads', 'bing_ads', 'tiktok_ads', 'pint
 const CATEGORIES = ['sidebar', 'report_tab', 'action', 'customer'];
 
 export function Admin() {
+  const { agencyId } = useAuth();
   const [activeTab, setActiveTab] = useState('users');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -50,22 +52,22 @@ export function Admin() {
           </div>
         )}
 
-        {activeTab === 'users' && <AdminUsersTab onMessage={showMessage} setLoading={setLoading} />}
+        {activeTab === 'users' && <AdminUsersTab onMessage={showMessage} setLoading={setLoading} agencyId={agencyId} />}
         {activeTab === 'roles' && <AdminRolesTab onMessage={showMessage} setLoading={setLoading} />}
-        {activeTab === 'clients' && <AdminClientsTab onMessage={showMessage} setLoading={setLoading} />}
+        {activeTab === 'clients' && <AdminClientsTab onMessage={showMessage} setLoading={setLoading} agencyId={agencyId} />}
         {activeTab === 'permissions' && <AdminPermissionsTab onMessage={showMessage} setLoading={setLoading} />}
       </div>
     </div>
   );
 }
 
-function AdminUsersTab({ onMessage, setLoading }) {
+function AdminUsersTab({ onMessage, setLoading, agencyId }) {
   const [users, setUsers] = useState([]);
   const [roles, setRoles] = useState([]);
   const [userAssignedClients, setUserAssignedClients] = useState({});
   const [search, setSearch] = useState('');
   const [manageClientsUser, setManageClientsUser] = useState(null);
-  const [allClients, setAllClients] = useState([]);
+  const [allPlatformAccounts, setAllPlatformAccounts] = useState([]);
   const [userClientAssignments, setUserClientAssignments] = useState({});
 
   const loadUsers = useCallback(async () => {
@@ -84,12 +86,12 @@ function AdminUsersTab({ onMessage, setLoading }) {
       setUsers(profiles || []);
 
       const { data: ucData } = await supabase.from('user_clients').select('user_id, client_id');
-      const { data: mcData } = await supabase.from('master_clients').select('id, client_name');
-      const mcMap = new Map((mcData || []).map((c) => [c.id, c.client_name]));
+      const { data: cpaData } = await supabase.from('client_platform_accounts').select('id, account_name, platform_customer_id');
+      const cpaMap = new Map((cpaData || []).map((c) => [c.id, c.account_name || c.platform_customer_id]));
       const byUser = {};
       (ucData || []).forEach((r) => {
         if (!byUser[r.user_id]) byUser[r.user_id] = [];
-        const name = mcMap.get(r.client_id) || r.client_id;
+        const name = cpaMap.get(r.client_id) || r.client_id;
         byUser[r.user_id].push({ client_id: r.client_id, client_name: name });
       });
       setUserAssignedClients(byUser);
@@ -102,10 +104,18 @@ function AdminUsersTab({ onMessage, setLoading }) {
 
   useEffect(() => { loadUsers(); }, [loadUsers]);
 
-  const loadAllClients = useCallback(async () => {
-    const { data } = await supabase.from('master_clients').select('id, client_name, is_active').order('client_name');
-    setAllClients(data || []);
-  }, []);
+  const loadAllPlatformAccounts = useCallback(async () => {
+    if (!agencyId) {
+      setAllPlatformAccounts([]);
+      return;
+    }
+    const { data } = await supabase
+      .from('client_platform_accounts')
+      .select('id, account_name, platform_customer_id, platform, is_active')
+      .eq('agency_id', agencyId)
+      .order('account_name');
+    setAllPlatformAccounts(data || []);
+  }, [agencyId]);
 
   const loadUserClients = useCallback(async (userId) => {
     const { data } = await supabase.from('user_clients').select('client_id').eq('user_id', userId);
@@ -114,7 +124,7 @@ function AdminUsersTab({ onMessage, setLoading }) {
 
   const openManageClients = async (user) => {
     setManageClientsUser(user);
-    await loadAllClients();
+    await loadAllPlatformAccounts();
     await loadUserClients(user.id);
   };
 
@@ -204,7 +214,7 @@ function AdminUsersTab({ onMessage, setLoading }) {
                 ? '—'
                 : assigned.length <= 2
                   ? assigned.map((a) => a.client_name).join(', ')
-                  : `${assigned.length} clients`;
+                  : `${assigned.length} accounts`;
               return (
                 <tr key={u.id}>
                   <td>{u.full_name || u.name || u.email?.split('@')[0] || '—'}</td>
@@ -250,19 +260,19 @@ function AdminUsersTab({ onMessage, setLoading }) {
       {manageClientsUser && (
         <div className="admin-modal-overlay" onClick={() => setManageClientsUser(null)}>
           <div className="admin-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Manage Clients: {manageClientsUser.full_name || manageClientsUser.email}</h3>
+            <h3>Manage Assigned Accounts: {manageClientsUser.full_name || manageClientsUser.email}</h3>
             <div className="admin-modal-body">
-              {allClients.length === 0 ? (
-                <p className="admin-modal-empty">No clients found. Add clients in the Clients tab first.</p>
+              {allPlatformAccounts.length === 0 ? (
+                <p className="admin-modal-empty">No platform accounts found. Add accounts in the Clients tab first.</p>
               ) : (
-                allClients.map((c) => (
+                allPlatformAccounts.map((c) => (
                   <label key={c.id} className="admin-checkbox-row">
                     <input
                       type="checkbox"
                       checked={(userClientAssignments[manageClientsUser.id] || new Set()).has(c.id)}
                       onChange={() => toggleClient(manageClientsUser.id, c.id)}
                     />
-                    {c.client_name}
+                    {c.account_name || c.platform_customer_id}
                     {c.is_active === false && <span className="admin-badge-inactive"> inactive</span>}
                   </label>
                 ))
@@ -350,7 +360,7 @@ function AdminRolesTab({ onMessage, setLoading }) {
   const createRole = async () => {
     if (!newRoleName.trim()) return;
     try {
-      const { error } = await supabase.from('roles').insert({ name: newRoleName.trim(), description: newRoleDesc.trim() || null });
+      const { error } = await supabase.from('roles').insert({ role_name: newRoleName.trim(), description: newRoleDesc.trim() || null });
       if (error) throw error;
       onMessage('Role created');
       setNewRoleModal(false);
@@ -369,7 +379,7 @@ function AdminRolesTab({ onMessage, setLoading }) {
     return acc;
   }, {});
 
-  const roleDisplayName = (r) => r.name || r.role_name || r.id;
+  const roleDisplayName = (r) => r.role_name || r.name || r.id;
 
   return (
     <div className="admin-card">
@@ -456,239 +466,149 @@ function AdminRolesTab({ onMessage, setLoading }) {
   );
 }
 
-function AdminClientsTab({ onMessage, setLoading }) {
-  const [clients, setClients] = useState([]);
-  const [platformAccountsByClient, setPlatformAccountsByClient] = useState({});
-  const [expandedClientId, setExpandedClientId] = useState(null);
-  const [addClientModal, setAddClientModal] = useState(false);
-  const [addAccountModal, setAddAccountModal] = useState(null);
-  const [formData, setFormData] = useState({});
+function AdminClientsTab({ onMessage, setLoading, agencyId }) {
+  const [accounts, setAccounts] = useState([]);
+  const [addModal, setAddModal] = useState(false);
+  const [formData, setFormData] = useState({ platform: 'google_ads', platform_customer_id: '', account_name: '' });
 
-  const loadClients = useCallback(async () => {
+  const loadAccounts = useCallback(async () => {
+    if (!agencyId) {
+      setAccounts([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      const { data: clientsData, error } = await supabase.from('master_clients').select('*').order('client_name');
+      const { data, error } = await supabase
+        .from('client_platform_accounts')
+        .select('*')
+        .eq('agency_id', agencyId)
+        .order('account_name');
       if (error) throw error;
-      setClients(clientsData || []);
-
-      const { data: paData } = await supabase.from('client_platform_accounts').select('*');
-      const byClient = {};
-      (paData || []).forEach((pa) => {
-        if (!byClient[pa.client_id]) byClient[pa.client_id] = [];
-        byClient[pa.client_id].push(pa);
-      });
-      setPlatformAccountsByClient(byClient);
+      setAccounts(data || []);
     } catch (err) {
-      onMessage(err.message || 'Failed to load clients', true);
+      onMessage(err.message || 'Failed to load accounts', true);
     } finally {
       setLoading(false);
     }
-  }, [onMessage, setLoading]);
+  }, [agencyId, onMessage, setLoading]);
 
-  useEffect(() => { loadClients(); }, [loadClients]);
+  useEffect(() => { loadAccounts(); }, [loadAccounts]);
 
-  const saveClient = async (updates) => {
-    if (!updates.client_name?.trim()) {
-      onMessage('Client name is required', true);
+  const addAccount = async () => {
+    if (!agencyId) {
+      onMessage('No agency assigned', true);
+      return;
+    }
+    if (!formData.platform || !formData.platform_customer_id?.trim()) {
+      onMessage('Platform and Platform Customer ID are required', true);
       return;
     }
     try {
-      if (updates.id) {
-        const { error } = await supabase.from('master_clients').update({
-          client_name: updates.client_name.trim(),
-          client_code: updates.client_code?.trim() || null,
-          contact_email: updates.contact_email?.trim() || null,
-          website: updates.website?.trim() || null,
-          notes: updates.notes?.trim() || null,
-        }).eq('id', updates.id);
-        if (error) throw error;
-        onMessage('Client updated');
-      } else {
-        const { error } = await supabase.from('master_clients').insert({
-          client_name: updates.client_name.trim(),
-          client_code: updates.client_code?.trim() || null,
-          contact_email: updates.contact_email?.trim() || null,
-          website: updates.website?.trim() || null,
-          notes: updates.notes?.trim() || null,
-          is_active: true,
-        });
-        if (error) throw error;
-        onMessage('Client created');
-      }
-      setAddClientModal(false);
-      setFormData({});
-      loadClients();
-    } catch (err) {
-      onMessage(err?.message || 'Failed', true);
-    }
-  };
-
-  const createClient = () => {
-    setFormData({ client_name: '', client_code: '', contact_email: '', website: '', notes: '' });
-    setAddClientModal(true);
-  };
-
-  const openAddAccount = (client) => {
-    setAddAccountModal(client);
-    setFormData({ platform: '', platform_customer_id: '', account_name: '' });
-  };
-
-  const addPlatformAccount = async () => {
-    const client = addAccountModal;
-    if (!client || !formData.platform || !formData.platform_customer_id?.trim()) {
-      onMessage('Platform and Account ID are required', true);
-      return;
-    }
-    try {
+      const { data: creds } = await supabase
+        .from('agency_platform_credentials')
+        .select('id')
+        .eq('agency_id', agencyId)
+        .eq('platform', formData.platform)
+        .eq('is_active', true)
+        .limit(1)
+        .maybeSingle();
+      const credentialId = creds?.id ?? null;
       const { error } = await supabase.from('client_platform_accounts').insert({
-        client_id: client.id,
+        agency_id: agencyId,
+        credential_id: credentialId,
         platform: formData.platform,
         platform_customer_id: formData.platform_customer_id.trim(),
-        account_name: formData.account_name?.trim() || null,
+        account_name: formData.account_name?.trim() || formData.platform_customer_id.trim(),
+        is_active: true,
       });
       if (error) throw error;
-      onMessage('Platform account added');
-      setAddAccountModal(null);
-      setFormData({});
-      loadClients();
+      onMessage('Account added');
+      setAddModal(false);
+      setFormData({ platform: 'google_ads', platform_customer_id: '', account_name: '' });
+      loadAccounts();
     } catch (err) {
-      onMessage(err?.message || 'Failed', true);
+      onMessage(err?.message || 'Failed to add', true);
     }
   };
 
-  const deletePlatformAccount = async (clientId, accountId) => {
-    if (!confirm('Delete this platform account?')) return;
+  const deleteAccount = async (account) => {
+    if (!confirm('Delete this account?')) return;
     try {
-      const { error } = await supabase.from('client_platform_accounts').delete().eq('id', accountId);
+      const { error } = await supabase.from('client_platform_accounts').delete().eq('id', account.id);
       if (error) throw error;
-      onMessage('Account removed');
-      loadClients();
+      onMessage('Account deleted');
+      loadAccounts();
     } catch (err) {
       onMessage(err?.message || 'Failed', true);
     }
   };
 
-  const toggleClientActive = async (client) => {
+  const toggleActive = async (account) => {
     try {
-      const { error } = await supabase.from('master_clients').update({ is_active: !client.is_active }).eq('id', client.id);
+      const { error } = await supabase
+        .from('client_platform_accounts')
+        .update({ is_active: !account.is_active })
+        .eq('id', account.id);
       if (error) throw error;
       onMessage('Status updated');
-      loadClients();
+      loadAccounts();
     } catch (err) {
       onMessage(err?.message || 'Failed', true);
     }
-  };
-
-  const toggleExpand = (clientId) => {
-    setExpandedClientId((prev) => (prev === clientId ? null : clientId));
   };
 
   return (
     <div className="admin-card">
       <div className="admin-toolbar">
-        <button type="button" className="btn btn-primary" onClick={createClient}>Add New Client</button>
+        <button type="button" className="btn btn-primary" onClick={() => { setFormData({ platform: 'google_ads', platform_customer_id: '', account_name: '' }); setAddModal(true); }}>
+          Add Account
+        </button>
       </div>
-      <div className="table-wrapper">
-        <table className="data-table gads-table admin-clients-table">
-          <thead>
-            <tr>
-              <th style={{ width: 32 }} />
-              <th>Client Name</th>
-              <th>Code</th>
-              <th>Email</th>
-              <th>Platform Accounts</th>
-              <th>Active</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {clients.map((c) => {
-              const accounts = platformAccountsByClient[c.id] || [];
-              const isExpanded = expandedClientId === c.id;
-              return (
-                <React.Fragment key={c.id}>
-                  <tr className={isExpanded ? 'admin-row-expanded' : ''}>
-                    <td>
-                      <button
-                        type="button"
-                        className="admin-expand-btn"
-                        onClick={() => toggleExpand(c.id)}
-                        aria-label={isExpanded ? 'Collapse' : 'Expand'}
-                      >
-                        {isExpanded ? '▼' : '▶'}
-                      </button>
-                    </td>
-                    <td>{c.client_name}</td>
-                    <td>{c.client_code || '—'}</td>
-                    <td>{c.contact_email || '—'}</td>
-                    <td>{accounts.length}</td>
-                    <td>
-                      <label className="admin-toggle">
-                        <input type="checkbox" checked={!!c.is_active} onChange={() => toggleClientActive(c)} />
-                        <span />
-                      </label>
-                    </td>
-                    <td>
-                      <button type="button" className="btn btn-outline btn-sm" onClick={() => openAddAccount(c)}>Add Platform Account</button>
-                    </td>
-                  </tr>
-                  {isExpanded && (
-                    <tr className="admin-expand-row">
-                      <td colSpan={7}>
-                        <div className="admin-platform-accounts-inline">
-                          <div className="admin-platform-accounts-header">
-                            <span>Linked platform accounts</span>
-                            <button type="button" className="btn btn-outline btn-sm" onClick={() => openAddAccount(c)}>+ Add Platform Account</button>
-                          </div>
-                          {accounts.length === 0 ? (
-                            <p className="admin-empty-hint">No platform accounts. Click &quot;Add Platform Account&quot; to link a Google Ads, Meta, etc. account.</p>
-                          ) : (
-                            <ul className="admin-platform-list">
-                              {accounts.map((pa) => (
-                                <li key={pa.id}>
-                                  <span className="admin-platform-badge">{pa.platform}</span>
-                                  <span>{pa.platform_customer_id}</span>
-                                  {pa.account_name && <span className="admin-account-name">{pa.account_name}</span>}
-                                  <button type="button" className="btn btn-outline btn-sm" onClick={() => deletePlatformAccount(c.id, pa.id)}>Delete</button>
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </React.Fragment>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      {addClientModal && (
-        <div className="admin-modal-overlay" onClick={() => setAddClientModal(false)}>
-          <div className="admin-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Add New Client</h3>
-            <div className="admin-modal-body">
-              {['client_name', 'client_code', 'contact_email', 'website', 'notes'].map((k) => (
-                <div key={k} className="auth-form-group">
-                  <label>{k.replace(/_/g, ' ')}{k === 'client_name' ? ' *' : ''}</label>
-                  <input type="text" value={formData[k] || ''} onChange={(e) => setFormData({ ...formData, [k]: e.target.value })} placeholder={k === 'client_name' ? 'Required' : ''} />
-                </div>
+      {!agencyId ? (
+        <p className="admin-empty-hint">No agency assigned. You must have an agency to manage accounts.</p>
+      ) : (
+        <div className="table-wrapper">
+          <table className="data-table gads-table admin-clients-table">
+            <thead>
+              <tr>
+                <th>Account Name</th>
+                <th>Platform</th>
+                <th>Customer ID</th>
+                <th>Active</th>
+                <th>Last Sync</th>
+                <th>Sync Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {accounts.map((a) => (
+                <tr key={a.id}>
+                  <td>{a.account_name || '—'}</td>
+                  <td><span className="admin-platform-badge">{a.platform}</span></td>
+                  <td>{a.platform_customer_id}</td>
+                  <td>
+                    <label className="admin-toggle">
+                      <input type="checkbox" checked={!!a.is_active} onChange={() => toggleActive(a)} />
+                      <span />
+                    </label>
+                  </td>
+                  <td>{a.last_sync_at ? new Date(a.last_sync_at).toLocaleString() : '—'}</td>
+                  <td>{a.sync_status || '—'}</td>
+                  <td>
+                    <button type="button" className="btn btn-outline btn-sm" onClick={() => deleteAccount(a)}>Delete</button>
+                  </td>
+                </tr>
               ))}
-            </div>
-            <div className="admin-modal-footer">
-              <button type="button" className="btn btn-outline" onClick={() => setAddClientModal(false)}>Cancel</button>
-              <button type="button" className="btn btn-primary" onClick={() => saveClient(formData)}>Create</button>
-            </div>
-          </div>
+            </tbody>
+          </table>
         </div>
       )}
 
-      {addAccountModal && (
-        <div className="admin-modal-overlay" onClick={() => setAddAccountModal(null)}>
+      {addModal && (
+        <div className="admin-modal-overlay" onClick={() => setAddModal(false)}>
           <div className="admin-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Add Platform Account — {addAccountModal.client_name}</h3>
+            <h3>Add Account</h3>
             <div className="admin-modal-body">
               <div className="auth-form-group">
                 <label>Platform *</label>
@@ -700,7 +620,7 @@ function AdminClientsTab({ onMessage, setLoading }) {
                 </select>
               </div>
               <div className="auth-form-group">
-                <label>Account ID *</label>
+                <label>Platform Customer ID *</label>
                 <input type="text" value={formData.platform_customer_id || ''} onChange={(e) => setFormData({ ...formData, platform_customer_id: e.target.value })} placeholder="e.g. 3969168045 for Google Ads" required />
               </div>
               <div className="auth-form-group">
@@ -709,8 +629,8 @@ function AdminClientsTab({ onMessage, setLoading }) {
               </div>
             </div>
             <div className="admin-modal-footer">
-              <button type="button" className="btn btn-outline" onClick={() => setAddAccountModal(null)}>Cancel</button>
-              <button type="button" className="btn btn-primary" onClick={addPlatformAccount}>Add</button>
+              <button type="button" className="btn btn-outline" onClick={() => setAddModal(false)}>Cancel</button>
+              <button type="button" className="btn btn-primary" onClick={addAccount}>Add</button>
             </div>
           </div>
         </div>

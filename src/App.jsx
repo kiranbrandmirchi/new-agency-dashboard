@@ -1,7 +1,6 @@
 import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
-import { ensureDashboardPermissions } from './lib/ensurePermissions';
 import { useApp } from './context/AppContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { Login } from './pages/Login';
@@ -112,10 +111,6 @@ function LoginRedirect({ children }) {
 }
 
 export default function App() {
-  useEffect(() => {
-    ensureDashboardPermissions();
-  }, []);
-
   return (
     <BrowserRouter>
       <Routes>
