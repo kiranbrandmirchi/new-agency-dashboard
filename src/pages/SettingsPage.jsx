@@ -93,7 +93,7 @@ export function SettingsPage() {
           'Authorization': `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({
-          platform_customer_id: account.platform_customer_id,
+          customer_id: account.customer_id,
           agency_id: agencyId,
           date_from: from.toISOString().slice(0, 10),
           date_to: now.toISOString().slice(0, 10),
@@ -137,7 +137,7 @@ export function SettingsPage() {
             'Authorization': `Bearer ${session.access_token}`,
           },
           body: JSON.stringify({
-            platform_customer_id: account.platform_customer_id,
+            customer_id: account.customer_id,
             agency_id: agencyId,
             date_from: from.toISOString().slice(0, 10),
             date_to: now.toISOString().slice(0, 10),
@@ -320,7 +320,7 @@ export function SettingsPage() {
                     {accounts.map((acc) => (
                       <tr key={acc.id}>
                         <td>{acc.account_name || ''}</td>
-                        <td>{acc.platform_customer_id}</td>
+                        <td>{acc.customer_id}</td>
                         <td>{acc.last_sync_at ? new Date(acc.last_sync_at).toLocaleString() : 'Never'}</td>
                         <td>
                           <span className={`badge ${acc.sync_status === 'synced' ? 'badge-green' : 'badge-gray'}`}>
