@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabaseClient';
 
 const AuthContext = createContext(null);
@@ -34,6 +34,8 @@ export function AuthProvider({ children }) {
   const [allowedClientAccounts, setAllowedClientAccounts] = useState([]);
   const [canViewAllCustomers, setCanViewAllCustomers] = useState(false);
   const [profileLoaded, setProfileLoaded] = useState(false);
+  const lastProfileLoad = useRef({ userId: null, at: 0 });
+  const PROFILE_LOAD_DEBOUNCE_MS = 2000;
 
   const isAuthenticated = !!session && !authError;
   const isActive = !authError || authError === 'pending';
@@ -55,6 +57,11 @@ export function AuthProvider({ children }) {
 
   const loadUserProfile = useCallback(async (userId, authUser = null) => {
     if (!userId) return;
+    const now = Date.now();
+    if (lastProfileLoad.current.userId === userId && now - lastProfileLoad.current.at < PROFILE_LOAD_DEBOUNCE_MS) {
+      return;
+    }
+    lastProfileLoad.current = { userId, at: now };
     try {
       const { data: profile, error: profileErr } = await withTimeout(
         supabase.from('user_profiles').select('*, agencies(*), roles(*)').eq('id', userId).single(),
@@ -204,8 +211,11 @@ export function AuthProvider({ children }) {
       setUser(s?.user ?? null);
       if (s) {
         setAuthError(null);
-        loadUserProfile(s.user?.id, s.user);
+        if (event !== 'TOKEN_REFRESHED') {
+          loadUserProfile(s.user?.id, s.user);
+        }
       } else {
+        lastProfileLoad.current = { userId: null, at: 0 };
         setUserProfile(null);
         setAgency(null);
         setAgencyId(null);

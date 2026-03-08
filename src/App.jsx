@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import { useApp } from './context/AppContext';
@@ -73,9 +73,11 @@ function DashboardLayoutContent() {
 function DashboardLayout() {
   const { showNotification } = useApp();
   const { userName } = useAuth();
+  const welcomeShown = useRef(false);
 
   useEffect(() => {
-    if (userName) {
+    if (userName && !welcomeShown.current) {
+      welcomeShown.current = true;
       showNotification(`Welcome back, ${userName}!`);
     }
   }, [userName, showNotification]);
