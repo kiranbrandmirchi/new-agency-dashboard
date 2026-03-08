@@ -26,19 +26,5 @@
     "command": "\r\n  SELECT net.http_post(\r\n    url := (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'project_url')\r\n           || '/functions/v1/gads-geo-resolve',\r\n    headers := jsonb_build_object(\r\n      'Content-Type', 'application/json',\r\n      'Authorization', 'Bearer ' ||\r\n        (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'anon_key')\r\n    ),\r\n    body := '{}'::jsonb\r\n  )\r\n\r\n  ",
     "database": "postgres",
     "active": true
-  },
-  {
-    "jobname": "backfill-fast",
-    "schedule": "* * * * *",
-    "command": "SELECT public.gads_backfill_next()",
-    "database": "postgres",
-    "active": true
-  },
-  {
-    "jobname": "daily-gads-sync",
-    "schedule": "0 6 * * *",
-    "command": "SELECT public.trigger_daily_gads_sync()",
-    "database": "postgres",
-    "active": true
   }
 ]
