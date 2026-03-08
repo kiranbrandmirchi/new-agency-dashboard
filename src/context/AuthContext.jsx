@@ -40,8 +40,10 @@ export function AuthProvider({ children }) {
 
   const hasPermission = useCallback((key) => {
     if (AUTH_DISABLED) return true;
+    if (userProfile?.is_super_admin) return true;
+    if (['super_admin', 'admin'].includes(userRole?.toLowerCase())) return true;
     return permissions.has(key);
-  }, [permissions]);
+  }, [permissions, userProfile?.is_super_admin, userRole]);
 
   const isCustomerAllowed = useCallback((platform, customerId) => {
     if (AUTH_DISABLED) return true;
@@ -105,10 +107,11 @@ export function AuthProvider({ children }) {
       setPermissions(permSet);
       setAuthError(null);
 
-      const { data: cpaData, error: cpaErr } = await withTimeout(
-        supabase.from('client_platform_accounts').select('id,platform_customer_id,account_name,platform').eq('is_active', true),
-        SUPABASE_TIMEOUT_MS
-      );
+      let cpaQuery = supabase.from('client_platform_accounts').select('id,platform_customer_id,account_name,platform,agency_id').eq('is_active', true);
+      if (profile.agency_id && !profile.is_super_admin) {
+        cpaQuery = cpaQuery.eq('agency_id', profile.agency_id);
+      }
+      const { data: cpaData, error: cpaErr } = await withTimeout(cpaQuery, SUPABASE_TIMEOUT_MS);
       if (cpaErr) console.warn('[Auth] client_platform_accounts error:', cpaErr);
 
       const clients = [];

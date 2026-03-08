@@ -147,7 +147,7 @@ body {
    ============================================ */
 .sidebar {
     width: var(--sidebar-width);
-    background: var(--navy);
+    background: var(--sidebar-bg, var(--navy));
     position: fixed;
     top: 0; left: 0; bottom: 0;
     z-index: 100;
@@ -321,7 +321,7 @@ body {
     padding: 9px 12px;
     font-size: 13px;
     font-weight: 500;
-    color: rgba(255,255,255,0.65);
+    color: var(--sidebar-text, rgba(255,255,255,0.65));
     text-decoration: none;
     border-radius: var(--radius-sm);
     transition: all 0.15s;
@@ -329,13 +329,13 @@ body {
 }
 
 .sidebar-nav a:hover {
-    color: #FFFFFF;
+    color: var(--sidebar-text, #FFFFFF);
     background: rgba(255,255,255,0.08);
 }
 
 .sidebar-nav a.active {
     background: var(--primary);
-    color: #FFFFFF;
+    color: var(--sidebar-text, #FFFFFF);
     font-weight: 600;
     box-shadow: 0 2px 8px rgba(225,38,39,0.3);
     border-left: 3px solid var(--accent);
@@ -844,6 +844,7 @@ body {
 .badge-yellow { background: var(--warning-bg); color: var(--warning-dark); }
 .badge-blue { background: var(--navy-bg); color: var(--navy); }
 .badge-purple { background: var(--purple-bg); color: var(--purple); }
+.badge-gray { background: var(--bg-tertiary); color: var(--text-muted); }
 
 /* ============================================
    SUBSCRIPTION FUNNEL

@@ -2,8 +2,28 @@ import { useState, useEffect, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabaseClient';
+import { syncWithChunking } from '../utils/syncHelper';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+
+const DATE_PRESETS = [
+  { key: 'last7', label: 'Last 7 days', days: 7 },
+  { key: 'last30', label: 'Last 30 days', days: 30 },
+  { key: 'last90', label: 'Last 90 days', days: 90 },
+  { key: 'custom', label: 'Custom range', days: null },
+];
+
+function getDateRangeFromPreset(presetKey) {
+  const preset = DATE_PRESETS.find((p) => p.key === presetKey);
+  if (!preset || preset.key === 'custom') return null;
+  const to = new Date();
+  const from = new Date(to);
+  from.setDate(from.getDate() - (preset.days || 7));
+  return {
+    dateFrom: from.toISOString().slice(0, 10),
+    dateTo: to.toISOString().slice(0, 10),
+  };
+}
 
 export function SettingsPage() {
   const { showNotification } = useApp();
@@ -17,6 +37,13 @@ export function SettingsPage() {
   const [togglingAccount, setTogglingAccount] = useState(null);
   const [syncingAccount, setSyncingAccount] = useState(null);
   const [syncingAll, setSyncingAll] = useState(false);
+  const [syncProgress, setSyncProgress] = useState(null);
+  const [syncLogs, setSyncLogs] = useState({});
+  const [expandedSyncHistory, setExpandedSyncHistory] = useState(null);
+
+  const [datePreset, setDatePreset] = useState('last7');
+  const [customDateFrom, setCustomDateFrom] = useState('');
+  const [customDateTo, setCustomDateTo] = useState('');
 
   const [agencyForm, setAgencyForm] = useState({
     agency_name: '', primary_color: '', secondary_color: '', accent_color: '',
@@ -28,6 +55,14 @@ export function SettingsPage() {
   const redirectUri = typeof window !== 'undefined'
     ? `${window.location.origin}/oauth/callback`
     : 'http://localhost:5173/oauth/callback';
+
+  const getEffectiveDateRange = useCallback(() => {
+    if (datePreset === 'custom') {
+      if (customDateFrom && customDateTo) return { dateFrom: customDateFrom, dateTo: customDateTo };
+      return getDateRangeFromPreset('last7');
+    }
+    return getDateRangeFromPreset(datePreset) || getDateRangeFromPreset('last7');
+  }, [datePreset, customDateFrom, customDateTo]);
 
   const fetchCredentials = useCallback(async () => {
     if (!agencyId) return;
@@ -57,6 +92,23 @@ export function SettingsPage() {
     } finally { setLoadingAccounts(false); }
   }, [agencyId]);
 
+  const fetchSyncLogs = useCallback(async (customerId) => {
+    if (!agencyId) return;
+    try {
+      const { data, error } = await supabase
+        .from('sync_log')
+        .select('*')
+        .eq('agency_id', agencyId)
+        .eq('customer_id', customerId)
+        .order('started_at', { ascending: false })
+        .limit(20);
+      if (error) throw error;
+      setSyncLogs((prev) => ({ ...prev, [customerId]: data || [] }));
+    } catch (err) {
+      console.warn('[Settings] sync_log error:', err);
+    }
+  }, [agencyId]);
+
   useEffect(() => { fetchCredentials(); }, [fetchCredentials]);
   useEffect(() => { fetchAccounts(); }, [fetchAccounts]);
 
@@ -75,46 +127,68 @@ export function SettingsPage() {
     }
   }, [agency]);
 
-  // ── Sync a single account ──
+  const insertSyncLog = useCallback(async (customerId, chunk) => {
+    if (!agencyId) return;
+    try {
+      await supabase.from('sync_log').insert({
+        agency_id: agencyId,
+        customer_id: customerId,
+        sync_type: 'chunk',
+        date_from: chunk.dateFrom,
+        date_to: chunk.dateTo,
+        status: chunk.status,
+        rows_synced: chunk.rowsSynced || 0,
+        error_message: chunk.errorMessage || null,
+        started_at: new Date().toISOString(),
+        completed_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.warn('[Settings] sync_log insert error:', err);
+    }
+  }, [agencyId]);
+
   const handleSyncAccount = async (account) => {
     setSyncingAccount(account.id);
+    setSyncProgress({ accountId: account.id, current: 0, total: 0, dateFrom: '', dateTo: '', status: '', rows: 0 });
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) { showNotification('Please sign in first.'); return; }
 
-      const now = new Date();
-      const from = new Date(now);
-      from.setDate(from.getDate() - 5);
-
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/gads-full-sync`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          customer_id: account.platform_customer_id,
-          agency_id: agencyId,
-          date_from: from.toISOString().slice(0, 10),
-          date_to: now.toISOString().slice(0, 10),
-          mode: 'backfill',
+      const { dateFrom, dateTo } = getEffectiveDateRange();
+      const result = await syncWithChunking({
+        customerId: account.platform_customer_id,
+        agencyId,
+        dateFrom,
+        dateTo,
+        accessToken: session.access_token,
+        chunkDays: 5,
+        onProgress: (p) => setSyncProgress({
+          accountId: account.id,
+          current: p.current,
+          total: p.total,
+          dateFrom: p.dateFrom,
+          dateTo: p.dateTo,
+          status: p.status,
+          rows: p.rows,
         }),
+        onChunkComplete: (chunk) => insertSyncLog(account.platform_customer_id, chunk),
       });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        const errText = data?.error || await res.text().catch(() => 'Sync failed');
-        throw new Error(typeof errText === 'string' ? errText : 'Sync failed');
+
+      if (result.success) {
+        showNotification(`Synced ${account.account_name || account.platform_customer_id}: ${result.totalRows} rows`);
+      } else {
+        showNotification(`Sync completed with errors: ${result.totalRows} rows. ${result.errors.length} chunk(s) failed.`);
       }
-      showNotification(`Synced ${account.account_name || account.platform_customer_id} successfully`);
       await fetchAccounts();
+      await fetchSyncLogs(account.platform_customer_id);
     } catch (err) {
       showNotification(err.message || 'Sync failed');
     } finally {
       setSyncingAccount(null);
+      setSyncProgress(null);
     }
   };
 
-  // ── Sync ALL active accounts ──
   const handleSyncAll = async () => {
     const activeAccounts = accounts.filter((a) => a.is_active && a.platform === 'google_ads');
     if (activeAccounts.length === 0) {
@@ -122,41 +196,50 @@ export function SettingsPage() {
       return;
     }
     setSyncingAll(true);
+    const { dateFrom, dateTo } = getEffectiveDateRange();
+    let totalRowsAll = 0;
     let successCount = 0;
     let failCount = 0;
 
     for (const account of activeAccounts) {
+      setSyncProgress({ accountId: account.id, accountName: account.account_name || account.platform_customer_id, current: 0, total: 0, dateFrom: '', dateTo: '', status: '', rows: 0 });
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) break;
 
-        const now = new Date();
-        const from = new Date(now);
-        from.setDate(from.getDate() - 5);
-
-        const res = await fetch(`${SUPABASE_URL}/functions/v1/gads-full-sync`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({
-            customer_id: account.platform_customer_id,
-            agency_id: agencyId,
-            date_from: from.toISOString().slice(0, 10),
-            date_to: now.toISOString().slice(0, 10),
-            mode: 'backfill',
+        const result = await syncWithChunking({
+          customerId: account.platform_customer_id,
+          agencyId,
+          dateFrom,
+          dateTo,
+          accessToken: session.access_token,
+          chunkDays: 5,
+          onProgress: (p) => setSyncProgress({
+            accountId: account.id,
+            accountName: account.account_name || account.platform_customer_id,
+            current: p.current,
+            total: p.total,
+            dateFrom: p.dateFrom,
+            dateTo: p.dateTo,
+            status: p.status,
+            rows: p.rows,
           }),
+          onChunkComplete: (chunk) => insertSyncLog(account.platform_customer_id, chunk),
         });
-        if (res.ok) successCount++;
+
+        totalRowsAll += result.totalRows;
+        if (result.success) successCount++;
         else failCount++;
+        await fetchSyncLogs(account.platform_customer_id);
       } catch {
         failCount++;
       }
     }
-    showNotification(`Sync complete: ${successCount} succeeded, ${failCount} failed`);
+
+    showNotification(`Sync complete: ${successCount} succeeded, ${failCount} failed. ${totalRowsAll} total rows.`);
     await fetchAccounts();
     setSyncingAll(false);
+    setSyncProgress(null);
   };
 
   const handleConnectGoogleAds = async () => {
@@ -214,6 +297,21 @@ export function SettingsPage() {
     } finally { setTogglingAccount(null); }
   };
 
+  const handleToggleAutoSync = async (account) => {
+    setTogglingAccount(account.id);
+    try {
+      const { error } = await supabase
+        .from('client_platform_accounts')
+        .update({ auto_sync_enabled: !account.auto_sync_enabled })
+        .eq('id', account.id);
+      if (error) throw error;
+      await fetchAccounts();
+      showNotification(account.auto_sync_enabled ? 'Auto-sync disabled' : 'Auto-sync enabled');
+    } catch (err) {
+      showNotification(err.message || 'Failed to update');
+    } finally { setTogglingAccount(null); }
+  };
+
   const handleSaveAgency = async () => {
     if (!agency?.id) return;
     setSavingAgency(true);
@@ -229,16 +327,21 @@ export function SettingsPage() {
         logo_url: agencyForm.logo_url || null,
       }).eq('id', agency.id);
       if (error) throw error;
-      const root = document.documentElement;
-      if (agencyForm.primary_color) { root.style.setProperty('--primary-color', agencyForm.primary_color); root.style.setProperty('--primary', agencyForm.primary_color); }
-      if (agencyForm.accent_color) { root.style.setProperty('--accent-color', agencyForm.accent_color); root.style.setProperty('--accent', agencyForm.accent_color); }
-      if (agencyForm.sidebar_bg) root.style.setProperty('--sidebar-bg', agencyForm.sidebar_bg);
-      if (agencyForm.sidebar_text) root.style.setProperty('--sidebar-text', agencyForm.sidebar_text);
-      if (agencyForm.font_family) root.style.setProperty('--font-family', agencyForm.font_family);
+      applyAgencyBranding(agencyForm);
       showNotification('Branding saved');
     } catch (err) {
       showNotification(err.message || 'Failed to save');
     } finally { setSavingAgency(false); }
+  };
+
+  const applyAgencyBranding = (form) => {
+    const root = document.documentElement;
+    if (form.primary_color) { root.style.setProperty('--primary-color', form.primary_color); root.style.setProperty('--primary', form.primary_color); }
+    if (form.secondary_color) root.style.setProperty('--secondary-color', form.secondary_color);
+    if (form.accent_color) { root.style.setProperty('--accent-color', form.accent_color); root.style.setProperty('--accent', form.accent_color); }
+    if (form.sidebar_bg) root.style.setProperty('--sidebar-bg', form.sidebar_bg);
+    if (form.sidebar_text) root.style.setProperty('--sidebar-text', form.sidebar_text);
+    if (form.font_family) root.style.setProperty('--font-family', form.font_family);
   };
 
   const handleSignOut = async () => { await signOut(); window.location.href = '/login'; };
@@ -294,12 +397,55 @@ export function SettingsPage() {
               </p>
             </div>
             {activeGadsAccounts.length > 0 && (
-              <button type="button" className="btn btn-primary btn-sm" onClick={handleSyncAll}
-                disabled={syncingAll}>
-                {syncingAll ? 'Syncing All…' : `Sync All Accounts (${activeGadsAccounts.length})`}
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  {DATE_PRESETS.map((p) => (
+                    <button
+                      key={p.key}
+                      type="button"
+                      className={`btn btn-sm ${datePreset === p.key ? 'btn-primary' : 'btn-outline'}`}
+                      onClick={() => setDatePreset(p.key)}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+                {datePreset === 'custom' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <input
+                      type="date"
+                      value={customDateFrom}
+                      onChange={(e) => setCustomDateFrom(e.target.value)}
+                      style={{ padding: '6px 8px', fontSize: 12, border: '1px solid var(--border)', borderRadius: 6 }}
+                    />
+                    <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>to</span>
+                    <input
+                      type="date"
+                      value={customDateTo}
+                      onChange={(e) => setCustomDateTo(e.target.value)}
+                      style={{ padding: '6px 8px', fontSize: 12, border: '1px solid var(--border)', borderRadius: 6 }}
+                    />
+                  </div>
+                )}
+                <button type="button" className="btn btn-primary btn-sm" onClick={handleSyncAll}
+                  disabled={syncingAll}>
+                  {syncingAll ? 'Syncing All…' : `Sync All Accounts (${activeGadsAccounts.length})`}
+                </button>
+              </div>
             )}
           </div>
+
+          {syncProgress && (
+            <div className="insight-banner info" style={{ marginTop: 12 }}>
+              <span className="icon">⏳</span>
+              <div>
+                {syncProgress.accountName && <strong>{syncProgress.accountName}: </strong>}
+                {syncProgress.total > 0
+                  ? `Syncing ${syncProgress.dateFrom}–${syncProgress.dateTo} (chunk ${syncProgress.current}/${syncProgress.total})` + (syncProgress.rows > 0 ? ` — ${syncProgress.rows} rows` : '')
+                  : 'Starting…'}
+              </div>
+            </div>
+          )}
 
           {loadingAccounts ? (
             <p style={{ color: 'var(--text-muted)' }}>Loading</p>
@@ -317,6 +463,7 @@ export function SettingsPage() {
                       <th>Customer ID</th>
                       <th>Last Sync</th>
                       <th>Status</th>
+                      <th>Auto-Sync</th>
                       <th>Active</th>
                       <th>Actions</th>
                     </tr>
@@ -331,6 +478,19 @@ export function SettingsPage() {
                           <span className={`badge ${acc.sync_status === 'synced' ? 'badge-green' : 'badge-gray'}`}>
                             {acc.sync_status || 'pending'}
                           </span>
+                        </td>
+                        <td>
+                          {acc.is_active && acc.platform === 'google_ads' && (
+                            <label className="admin-toggle">
+                              <input
+                                type="checkbox"
+                                checked={!!acc.auto_sync_enabled}
+                                onChange={() => handleToggleAutoSync(acc)}
+                                disabled={togglingAccount === acc.id}
+                              />
+                              <span />
+                            </label>
+                          )}
                         </td>
                         <td>
                           <button type="button"
@@ -354,6 +514,70 @@ export function SettingsPage() {
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
+
+          {/* Sync Schedule section */}
+          {activeGadsAccounts.length > 0 && (
+            <div style={{ marginTop: 16, padding: 16, background: 'var(--bg-secondary)', borderRadius: 8, border: '1px solid var(--border)' }}>
+              <h4 style={{ fontSize: 14, marginBottom: 8 }}>Sync Schedule</h4>
+              <p className="help-text" style={{ marginBottom: 8 }}>
+                Daily Auto-Sync runs for accounts with Auto-Sync enabled. Set up pg_cron or an external scheduler to call the gads-full-sync edge function for accounts where auto_sync_enabled = true. See migration 002 for SQL comments.
+              </p>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                Last sync: {credentials.find((c) => c.platform === 'google_ads')?.last_sync_at
+                  ? new Date(credentials.find((c) => c.platform === 'google_ads').last_sync_at).toLocaleString()
+                  : 'Never'}
+              </div>
+            </div>
+          )}
+
+          {/* Sync History expandable */}
+          {accounts.length > 0 && !loadingAccounts && (
+            <div style={{ marginTop: 16 }}>
+              {accounts.filter((a) => a.platform === 'google_ads').map((acc) => (
+                <div key={acc.id} style={{ marginBottom: 8 }}>
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-sm"
+                    onClick={() => {
+                      const next = expandedSyncHistory === acc.platform_customer_id ? null : acc.platform_customer_id;
+                      setExpandedSyncHistory(next);
+                      if (next) fetchSyncLogs(next);
+                    }}
+                  >
+                    {expandedSyncHistory === acc.platform_customer_id ? '▼' : '▶'} Sync History: {acc.account_name || acc.platform_customer_id}
+                  </button>
+                  {expandedSyncHistory === acc.platform_customer_id && (
+                    <div style={{ marginTop: 8, padding: 12, background: 'var(--bg-secondary)', borderRadius: 8, border: '1px solid var(--border)', maxHeight: 200, overflowY: 'auto' }}>
+                      {(syncLogs[acc.platform_customer_id] || []).length === 0 ? (
+                        <p style={{ color: 'var(--text-muted)', fontSize: 12 }}>No sync history yet.</p>
+                      ) : (
+                        <table className="data-table" style={{ fontSize: 12 }}>
+                          <thead>
+                            <tr>
+                              <th>Date Range</th>
+                              <th>Status</th>
+                              <th>Rows</th>
+                              <th>Time</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(syncLogs[acc.platform_customer_id] || []).map((log) => (
+                              <tr key={log.id}>
+                                <td>{log.date_from} – {log.date_to}</td>
+                                <td><span className={`badge ${log.status === 'success' ? 'badge-green' : 'badge-gray'}`}>{log.status}</span></td>
+                                <td>{log.rows_synced ?? 0}</td>
+                                <td>{log.started_at ? new Date(log.started_at).toLocaleString() : '—'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
           )}
         </div>

@@ -2,18 +2,45 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../context/AuthContext';
 
-const ADMIN_TABS = [
-  { id: 'users', label: 'Users' },
-  { id: 'roles', label: 'Roles' },
-  { id: 'clients', label: 'Clients' },
-  { id: 'permissions', label: 'Permissions' },
-];
-
 const PLATFORMS = ['google_ads', 'facebook_ads', 'bing_ads', 'tiktok_ads', 'pinterest_ads', 'reddit_ads', 'snapchat_ads', 'linkedin_ads'];
 const CATEGORIES = ['sidebar', 'report_tab', 'action', 'customer'];
 
+const DEFAULT_PERMISSIONS = [
+  { permission_key: 'tab.combined_dashboard', permission_label: 'Dashboard Tab', category: 'sidebar' },
+  { permission_key: 'sidebar.google_ads', permission_label: 'Google Ads', category: 'sidebar' },
+  { permission_key: 'sidebar.facebook_ads', permission_label: 'Meta / Facebook Ads', category: 'sidebar' },
+  { permission_key: 'sidebar.bing_ads', permission_label: 'Bing / Microsoft Ads', category: 'sidebar' },
+  { permission_key: 'sidebar.tiktok_ads', permission_label: 'TikTok Ads', category: 'sidebar' },
+  { permission_key: 'sidebar.reddit_ads', permission_label: 'Reddit Ads', category: 'sidebar' },
+  { permission_key: 'sidebar.dsp', permission_label: 'DSP (TTD / DV360)', category: 'sidebar' },
+  { permission_key: 'sidebar.dating_apps', permission_label: 'Dating Apps / Direct', category: 'sidebar' },
+  { permission_key: 'sidebar.ctv', permission_label: 'CTV Campaigns', category: 'sidebar' },
+  { permission_key: 'sidebar.analytics', permission_label: 'GA4 / Web Analytics', category: 'sidebar' },
+  { permission_key: 'sidebar.email', permission_label: 'Email Marketing', category: 'sidebar' },
+  { permission_key: 'sidebar.ghl', permission_label: 'GoHighLevel', category: 'sidebar' },
+  { permission_key: 'sidebar.ott', permission_label: 'OTT / Vimeo', category: 'sidebar' },
+  { permission_key: 'sidebar.seo', permission_label: 'SEO Performance', category: 'sidebar' },
+  { permission_key: 'sidebar.geo', permission_label: 'Geographic View', category: 'sidebar' },
+  { permission_key: 'sidebar.creatives', permission_label: 'Creative Analysis', category: 'sidebar' },
+  { permission_key: 'sidebar.events', permission_label: 'Events / Special', category: 'sidebar' },
+  { permission_key: 'sidebar.settings', permission_label: 'White-Label Settings', category: 'sidebar' },
+  { permission_key: 'tab.daily_breakdown', permission_label: 'Daily Breakdown', category: 'report_tab' },
+  { permission_key: 'tab.overview', permission_label: 'Campaign Types / Overview', category: 'report_tab' },
+  { permission_key: 'tab.campaigns', permission_label: 'Campaigns', category: 'report_tab' },
+  { permission_key: 'tab.ad_groups', permission_label: 'Ad Groups', category: 'report_tab' },
+  { permission_key: 'tab.keywords', permission_label: 'Keywords', category: 'report_tab' },
+  { permission_key: 'tab.search_terms', permission_label: 'Search Terms', category: 'report_tab' },
+  { permission_key: 'tab.geo', permission_label: 'Geo', category: 'report_tab' },
+  { permission_key: 'tab.conversions', permission_label: 'Conversions', category: 'report_tab' },
+  { permission_key: 'action.export_pdf', permission_label: 'Export PDF', category: 'action' },
+  { permission_key: 'action.share_report', permission_label: 'Share Report', category: 'action' },
+  { permission_key: 'action.sync_data', permission_label: 'Sync Data', category: 'action' },
+  { permission_key: 'action.manage_users', permission_label: 'Manage Users / Admin Panel', category: 'action' },
+];
+
 export function Admin() {
-  const { agencyId } = useAuth();
+  const { agencyId, userProfile, userRole } = useAuth();
+  const isSuperAdmin = userProfile?.is_super_admin || userRole?.toLowerCase() === 'super_admin';
   const [activeTab, setActiveTab] = useState('users');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -25,6 +52,15 @@ export function Admin() {
     setTimeout(() => { setMessage(null); setError(null); }, 4000);
   }, []);
 
+  const tabs = [
+    ...(isSuperAdmin ? [{ id: 'agencies', label: 'Agencies' }] : []),
+    { id: 'users', label: 'Users' },
+    { id: 'roles', label: 'Roles' },
+    { id: 'clients', label: 'Clients' },
+    { id: 'permissions', label: 'Permissions' },
+    { id: 'report_tabs', label: 'Report Tabs' },
+  ];
+
   return (
     <div className="page-section active" id="page-admin">
       <div className="page-content">
@@ -34,7 +70,7 @@ export function Admin() {
         </div>
 
         <div className="admin-tabs">
-          {ADMIN_TABS.map((t) => (
+          {tabs.map((t) => (
             <button
               key={t.id}
               type="button"
@@ -52,18 +88,184 @@ export function Admin() {
           </div>
         )}
 
-        {activeTab === 'users' && <AdminUsersTab onMessage={showMessage} setLoading={setLoading} agencyId={agencyId} />}
+        {activeTab === 'agencies' && isSuperAdmin && <AdminAgenciesTab onMessage={showMessage} setLoading={setLoading} />}
+        {activeTab === 'users' && <AdminUsersTab onMessage={showMessage} setLoading={setLoading} agencyId={agencyId} isSuperAdmin={isSuperAdmin} />}
         {activeTab === 'roles' && <AdminRolesTab onMessage={showMessage} setLoading={setLoading} />}
         {activeTab === 'clients' && <AdminClientsTab onMessage={showMessage} setLoading={setLoading} agencyId={agencyId} />}
         {activeTab === 'permissions' && <AdminPermissionsTab onMessage={showMessage} setLoading={setLoading} />}
+        {activeTab === 'report_tabs' && <AdminReportTabsTab onMessage={showMessage} setLoading={setLoading} agencyId={agencyId} />}
       </div>
     </div>
   );
 }
 
-function AdminUsersTab({ onMessage, setLoading, agencyId }) {
+function AdminAgenciesTab({ onMessage, setLoading }) {
+  const [agencies, setAgencies] = useState([]);
+  const [editingAgency, setEditingAgency] = useState(null);
+  const [formData, setFormData] = useState({ agency_name: '', primary_color: '#E12627', secondary_color: '', accent_color: '#0083CB', sidebar_bg: '', sidebar_text: '', font_family: '', logo_url: '' });
+  const [usersByAgency, setUsersByAgency] = useState({});
+  const [credsByAgency, setCredsByAgency] = useState({});
+
+  const loadAgencies = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.from('agencies').select('*').order('agency_name');
+      if (error) throw error;
+      setAgencies(data || []);
+    } catch (err) {
+      onMessage(err?.message || 'Failed to load agencies', true);
+    } finally {
+      setLoading(false);
+    }
+  }, [onMessage, setLoading]);
+
+  const loadAgencyDetails = useCallback(async (agencyId) => {
+    const [usersRes, credsRes] = await Promise.all([
+      supabase.from('user_profiles').select('id, full_name, email').eq('agency_id', agencyId),
+      supabase.from('agency_platform_credentials').select('id, platform, is_active').eq('agency_id', agencyId),
+    ]);
+    setUsersByAgency((p) => ({ ...p, [agencyId]: usersRes.data || [] }));
+    setCredsByAgency((p) => ({ ...p, [agencyId]: credsRes.data || [] }));
+  }, []);
+
+  useEffect(() => { loadAgencies(); }, [loadAgencies]);
+
+  const saveAgency = async () => {
+    if (!formData.agency_name?.trim()) return;
+    try {
+      if (editingAgency) {
+        const { error } = await supabase.from('agencies').update({
+          agency_name: formData.agency_name.trim(),
+          primary_color: formData.primary_color || null,
+          secondary_color: formData.secondary_color || null,
+          accent_color: formData.accent_color || null,
+          sidebar_bg: formData.sidebar_bg || null,
+          sidebar_text: formData.sidebar_text || null,
+          font_family: formData.font_family || null,
+          logo_url: formData.logo_url || null,
+        }).eq('id', editingAgency.id);
+        if (error) throw error;
+        onMessage('Agency updated');
+      } else {
+        const { error } = await supabase.from('agencies').insert({
+          agency_name: formData.agency_name.trim(),
+          primary_color: formData.primary_color || null,
+          secondary_color: formData.secondary_color || null,
+          accent_color: formData.accent_color || null,
+          sidebar_bg: formData.sidebar_bg || null,
+          sidebar_text: formData.sidebar_text || null,
+          font_family: formData.font_family || null,
+          logo_url: formData.logo_url || null,
+        });
+        if (error) throw error;
+        onMessage('Agency created');
+      }
+      setEditingAgency(null);
+      setFormData({ agency_name: '', primary_color: '#E12627', secondary_color: '', accent_color: '#0083CB', sidebar_bg: '', sidebar_text: '', font_family: '', logo_url: '' });
+      loadAgencies();
+    } catch (err) {
+      onMessage(err?.message || 'Failed to save', true);
+    }
+  };
+
+  const openEdit = (a) => {
+    setEditingAgency(a);
+    setFormData({
+      agency_name: a.agency_name || '',
+      primary_color: a.primary_color || '#E12627',
+      secondary_color: a.secondary_color || '',
+      accent_color: a.accent_color || '#0083CB',
+      sidebar_bg: a.sidebar_bg || '',
+      sidebar_text: a.sidebar_text || '',
+      font_family: a.font_family || '',
+      logo_url: a.logo_url || '',
+    });
+    loadAgencyDetails(a.id);
+  };
+
+  return (
+    <div className="admin-card">
+      <div className="admin-toolbar">
+        <button type="button" className="btn btn-primary" onClick={() => { setEditingAgency({}); setFormData({ agency_name: '', primary_color: '#E12627', secondary_color: '', accent_color: '#0083CB', sidebar_bg: '', sidebar_text: '', font_family: '', logo_url: '' }); }}>Create Agency</button>
+      </div>
+      <div className="table-wrapper">
+        <table className="data-table gads-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Users</th>
+              <th>Credentials</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {agencies.map((a) => (
+              <tr key={a.id}>
+                <td>{a.agency_name || '—'}</td>
+                <td>
+                  <button type="button" className="btn btn-outline btn-sm" onClick={() => loadAgencyDetails(a.id)}>
+                    View ({usersByAgency[a.id]?.length ?? '?'})
+                  </button>
+                  {usersByAgency[a.id]?.length > 0 && (
+                    <ul style={{ marginTop: 4, paddingLeft: 16, fontSize: 12 }}>
+                      {usersByAgency[a.id].slice(0, 3).map((u) => (
+                        <li key={u.id}>{u.full_name || u.email}</li>
+                      ))}
+                      {usersByAgency[a.id].length > 3 && <li>+{usersByAgency[a.id].length - 3} more</li>}
+                    </ul>
+                  )}
+                </td>
+                <td>
+                  {(credsByAgency[a.id] || []).map((c) => (
+                    <span key={c.id} className="admin-platform-badge" style={{ marginRight: 4 }}>{c.platform}</span>
+                  ))}
+                  {(credsByAgency[a.id] || []).length === 0 && '—'}
+                </td>
+                <td>
+                  <button type="button" className="btn btn-outline btn-sm" onClick={() => openEdit(a)}>Edit</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {editingAgency && (
+        <div className="admin-modal-overlay" onClick={() => setEditingAgency(null)}>
+          <div className="admin-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
+            <h3>{editingAgency.id ? 'Edit Agency' : 'Create Agency'}</h3>
+            <div className="admin-modal-body">
+              <div className="auth-form-group">
+                <label>Agency Name *</label>
+                <input type="text" value={formData.agency_name} onChange={(e) => setFormData({ ...formData, agency_name: e.target.value })} placeholder="Agency name" />
+              </div>
+              <div className="auth-form-group">
+                <label>Primary Color</label>
+                <input type="color" value={formData.primary_color || '#E12627'} onChange={(e) => setFormData({ ...formData, primary_color: e.target.value })} style={{ width: 60, height: 32 }} />
+              </div>
+              <div className="auth-form-group">
+                <label>Accent Color</label>
+                <input type="color" value={formData.accent_color || '#0083CB'} onChange={(e) => setFormData({ ...formData, accent_color: e.target.value })} style={{ width: 60, height: 32 }} />
+              </div>
+              <div className="auth-form-group">
+                <label>Logo URL</label>
+                <input type="text" value={formData.logo_url} onChange={(e) => setFormData({ ...formData, logo_url: e.target.value })} placeholder="https://..." />
+              </div>
+            </div>
+            <div className="admin-modal-footer">
+              <button type="button" className="btn btn-outline" onClick={() => setEditingAgency(null)}>Cancel</button>
+              <button type="button" className="btn btn-primary" onClick={saveAgency}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AdminUsersTab({ onMessage, setLoading, agencyId, isSuperAdmin }) {
   const [users, setUsers] = useState([]);
   const [roles, setRoles] = useState([]);
+  const [agencies, setAgencies] = useState([]);
   const [userAssignedClients, setUserAssignedClients] = useState({});
   const [search, setSearch] = useState('');
   const [manageClientsUser, setManageClientsUser] = useState(null);
@@ -77,16 +279,19 @@ function AdminUsersTab({ onMessage, setLoading, agencyId }) {
       if (rolesErr) console.warn('[Admin] roles fetch:', rolesErr);
       setRoles(rolesData || []);
 
-      const { data: profiles, error } = await supabase
-        .from('user_profiles')
-        .select('id, email, full_name, is_active, role_id')
-        .order('full_name');
+      const { data: agenciesData } = await supabase.from('agencies').select('id, agency_name');
+      setAgencies(agenciesData || []);
 
+      let query = supabase.from('user_profiles').select('id, email, full_name, is_active, role_id, agency_id, agencies(agency_name)').order('full_name');
+      if (!isSuperAdmin && agencyId) {
+        query = query.eq('agency_id', agencyId);
+      }
+      const { data: profiles, error } = await query;
       if (error) throw error;
       setUsers(profiles || []);
 
       const { data: ucData } = await supabase.from('user_clients').select('user_id, client_id');
-      const { data: cpaData } = await supabase.from('client_platform_accounts').select('id, account_name, platform_customer_id');
+      const { data: cpaData } = await supabase.from('client_platform_accounts').select('id, account_name, platform_customer_id, agency_id');
       const cpaMap = new Map((cpaData || []).map((c) => [c.id, c.account_name || c.platform_customer_id]));
       const byUser = {};
       (ucData || []).forEach((r) => {
@@ -100,19 +305,20 @@ function AdminUsersTab({ onMessage, setLoading, agencyId }) {
     } finally {
       setLoading(false);
     }
-  }, [onMessage, setLoading]);
+  }, [onMessage, setLoading, agencyId, isSuperAdmin]);
 
   useEffect(() => { loadUsers(); }, [loadUsers]);
 
-  const loadAllPlatformAccounts = useCallback(async () => {
-    if (!agencyId) {
+  const loadAllPlatformAccounts = useCallback(async (targetAgencyId) => {
+    const aid = targetAgencyId || agencyId;
+    if (!aid) {
       setAllPlatformAccounts([]);
       return;
     }
     const { data } = await supabase
       .from('client_platform_accounts')
       .select('id, account_name, platform_customer_id, platform, is_active')
-      .eq('agency_id', agencyId)
+      .eq('agency_id', aid)
       .order('account_name');
     setAllPlatformAccounts(data || []);
   }, [agencyId]);
@@ -124,8 +330,19 @@ function AdminUsersTab({ onMessage, setLoading, agencyId }) {
 
   const openManageClients = async (user) => {
     setManageClientsUser(user);
-    await loadAllPlatformAccounts();
+    await loadAllPlatformAccounts(user.agency_id);
     await loadUserClients(user.id);
+  };
+
+  const saveUserAgency = async (userId, newAgencyId) => {
+    try {
+      const { error } = await supabase.from('user_profiles').update({ agency_id: newAgencyId || null }).eq('id', userId);
+      if (error) throw error;
+      onMessage('Agency updated');
+      loadUsers();
+    } catch (err) {
+      onMessage(err?.message || 'Failed to update agency', true);
+    }
   };
 
   const saveUserRole = async (userId, roleId) => {
@@ -201,6 +418,7 @@ function AdminUsersTab({ onMessage, setLoading, agencyId }) {
             <tr>
               <th>Name</th>
               <th>Email</th>
+              <th>Agency</th>
               <th>Role</th>
               <th>Active</th>
               <th>Assigned Clients</th>
@@ -219,6 +437,22 @@ function AdminUsersTab({ onMessage, setLoading, agencyId }) {
                 <tr key={u.id}>
                   <td>{u.full_name || u.name || u.email?.split('@')[0] || '—'}</td>
                   <td>{u.email}</td>
+                  <td>
+                    {isSuperAdmin ? (
+                      <select
+                        className="admin-role-select"
+                        value={u.agency_id || ''}
+                        onChange={(e) => saveUserAgency(u.id, e.target.value || null)}
+                      >
+                        <option value="">— No agency —</option>
+                        {agencies.map((a) => (
+                          <option key={a.id} value={a.id}>{a.agency_name || a.id}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      u.agencies?.agency_name || '—'
+                    )}
+                  </td>
                   <td>
                     <select
                       className="admin-role-select"
@@ -643,6 +877,7 @@ function AdminPermissionsTab({ onMessage, setLoading }) {
   const [permissions, setPermissions] = useState([]);
   const [addModal, setAddModal] = useState(false);
   const [formData, setFormData] = useState({});
+  const [seeding, setSeeding] = useState(false);
 
   const loadPermissions = useCallback(async () => {
     setLoading(true);
@@ -652,6 +887,27 @@ function AdminPermissionsTab({ onMessage, setLoading }) {
   }, [setLoading]);
 
   useEffect(() => { loadPermissions(); }, [loadPermissions]);
+
+  const seedDefaultPermissions = async () => {
+    setSeeding(true);
+    try {
+      const { data: existing } = await supabase.from('permissions').select('permission_key');
+      const existingKeys = new Set((existing || []).map((p) => p.permission_key));
+      const toInsert = DEFAULT_PERMISSIONS.filter((p) => !existingKeys.has(p.permission_key));
+      if (toInsert.length === 0) {
+        onMessage('All default permissions already exist');
+        return;
+      }
+      const { error } = await supabase.from('permissions').insert(toInsert);
+      if (error) throw error;
+      onMessage(`Seeded ${toInsert.length} new permissions`);
+      loadPermissions();
+    } catch (err) {
+      onMessage(err?.message || 'Failed to seed', true);
+    } finally {
+      setSeeding(false);
+    }
+  };
 
   const createPermission = async () => {
     if (!formData.permission_key?.trim()) return;
@@ -692,6 +948,9 @@ function AdminPermissionsTab({ onMessage, setLoading }) {
     <div className="admin-card">
       <div className="admin-toolbar">
         <button type="button" className="btn btn-primary" onClick={() => { setFormData({}); setAddModal(true); }}>Add New Permission</button>
+        <button type="button" className="btn btn-outline" onClick={seedDefaultPermissions} disabled={seeding}>
+          {seeding ? 'Seeding…' : 'Seed Default Permissions'}
+        </button>
       </div>
       <div className="admin-permissions-list">
         {CATEGORIES.map((cat) => (
@@ -741,6 +1000,162 @@ function AdminPermissionsTab({ onMessage, setLoading }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+const DEFAULT_REPORT_TABS = [
+  { tab_key: 'daily', tab_label: 'Daily Breakdown', tab_order: 1, required_permission: 'tab.daily_breakdown' },
+  { tab_key: 'campaigntypes', tab_label: 'Campaign Types', tab_order: 2, required_permission: 'tab.overview' },
+  { tab_key: 'campaigns', tab_label: 'Campaigns', tab_order: 3, required_permission: 'tab.campaigns' },
+  { tab_key: 'adgroups', tab_label: 'Ad Groups', tab_order: 4, required_permission: 'tab.ad_groups' },
+  { tab_key: 'keywords', tab_label: 'Keywords', tab_order: 5, required_permission: 'tab.keywords' },
+  { tab_key: 'searchterms', tab_label: 'Search Terms', tab_order: 6, required_permission: 'tab.search_terms' },
+  { tab_key: 'geo', tab_label: 'Geo', tab_order: 7, required_permission: 'tab.geo' },
+  { tab_key: 'conversions', tab_label: 'Conversions', tab_order: 8, required_permission: 'tab.conversions' },
+];
+
+function AdminReportTabsTab({ onMessage, setLoading, agencyId }) {
+  const [tabs, setTabs] = useState([]);
+  const [permissions, setPermissions] = useState([]);
+
+  const loadTabs = useCallback(async () => {
+    if (!agencyId) {
+      setTabs([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('agency_report_tabs')
+        .select('*')
+        .eq('agency_id', agencyId)
+        .eq('platform', 'google_ads')
+        .order('tab_order');
+      if (error) throw error;
+      setTabs(data && data.length > 0 ? data : DEFAULT_REPORT_TABS.map((t, i) => ({ ...t, agency_id: agencyId, id: null, is_visible: true })));
+    } catch (err) {
+      onMessage(err?.message || 'Failed to load', true);
+    } finally {
+      setLoading(false);
+    }
+  }, [agencyId, onMessage, setLoading]);
+
+  const loadPermissions = useCallback(async () => {
+    const { data } = await supabase.from('permissions').select('id, permission_key, permission_label').eq('category', 'report_tab').order('permission_key');
+    setPermissions(data || []);
+  }, []);
+
+  useEffect(() => { loadTabs(); loadPermissions(); }, [loadTabs, loadPermissions]);
+
+  const moveTab = async (index, direction) => {
+    const newTabs = [...tabs];
+    const swap = index + (direction === 'up' ? -1 : 1);
+    if (swap < 0 || swap >= newTabs.length) return;
+    [newTabs[index], newTabs[swap]] = [newTabs[swap], newTabs[index]];
+    newTabs.forEach((t, i) => { t.tab_order = i + 1; });
+    setTabs(newTabs);
+    await saveTabs(newTabs);
+  };
+
+  const saveTabs = async (tabsToSave = tabs) => {
+    if (!agencyId) return;
+    try {
+      const { error: delErr } = await supabase.from('agency_report_tabs').delete().eq('agency_id', agencyId).eq('platform', 'google_ads');
+      if (delErr) throw delErr;
+      const rows = tabsToSave.map((t, i) => ({
+        agency_id: agencyId,
+        tab_key: t.tab_key,
+        tab_label: t.tab_label || t.tab_key,
+        tab_order: i + 1,
+        is_visible: t.is_visible !== false,
+        required_permission: t.required_permission || null,
+        platform: 'google_ads',
+      }));
+      if (rows.length > 0) {
+        const { error: insErr } = await supabase.from('agency_report_tabs').insert(rows);
+        if (insErr) throw insErr;
+      }
+      onMessage('Report tabs saved');
+      loadTabs();
+    } catch (err) {
+      onMessage(err?.message || 'Failed to save', true);
+    }
+  };
+
+  const updateTab = (index, field, value) => {
+    const newTabs = [...tabs];
+    newTabs[index] = { ...newTabs[index], [field]: value };
+    setTabs(newTabs);
+  };
+
+  const toggleVisible = (index) => {
+    updateTab(index, 'is_visible', !tabs[index].is_visible);
+  };
+
+  if (!agencyId) {
+    return <p className="admin-empty-hint">No agency assigned. You must have an agency to configure report tabs.</p>;
+  }
+
+  return (
+    <div className="admin-card">
+      <div className="admin-toolbar">
+        <button type="button" className="btn btn-primary" onClick={() => saveTabs()}>Save Report Tabs</button>
+      </div>
+      <p className="help-text" style={{ marginBottom: 16 }}>Configure which tabs appear on the Google Ads page for your agency. Reorder, show/hide, and assign permissions.</p>
+      <div className="table-wrapper">
+        <table className="data-table gads-table">
+          <thead>
+            <tr>
+              <th style={{ width: 80 }}>Order</th>
+              <th>Tab</th>
+              <th>Label</th>
+              <th>Required Permission</th>
+              <th>Visible</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tabs.map((t, i) => (
+              <tr key={t.tab_key || i}>
+                <td>
+                  <button type="button" className="btn btn-outline btn-sm btn-xs" onClick={() => moveTab(i, 'up')} disabled={i === 0}>↑</button>
+                  <button type="button" className="btn btn-outline btn-sm btn-xs" onClick={() => moveTab(i, 'down')} disabled={i === tabs.length - 1}>↓</button>
+                </td>
+                <td>{t.tab_key}</td>
+                <td>
+                  <input
+                    type="text"
+                    value={t.tab_label || ''}
+                    onChange={(e) => updateTab(i, 'tab_label', e.target.value)}
+                    style={{ width: '100%', maxWidth: 180, padding: '6px 8px', fontSize: 12 }}
+                  />
+                </td>
+                <td>
+                  <select
+                    value={t.required_permission || ''}
+                    onChange={(e) => updateTab(i, 'required_permission', e.target.value || null)}
+                    style={{ minWidth: 160, padding: '6px 8px', fontSize: 12 }}
+                  >
+                    <option value="">— None —</option>
+                    {permissions.map((p) => (
+                      <option key={p.id} value={p.permission_key}>{p.permission_label || p.permission_key}</option>
+                    ))}
+                  </select>
+                </td>
+                <td>
+                  <label className="admin-toggle">
+                    <input type="checkbox" checked={t.is_visible !== false} onChange={() => toggleVisible(i)} />
+                    <span />
+                  </label>
+                </td>
+                <td>—</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

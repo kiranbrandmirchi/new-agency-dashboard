@@ -88,7 +88,7 @@ export function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const { currentPage, showPage, sidebarOpen, sidebarCollapsed } = useApp();
-  const { hasPermission } = useAuth();
+  const { hasPermission, agency } = useAuth();
   const isAdmin = location.pathname === '/admin';
 
   const sidebarClass = ['sidebar', sidebarOpen && 'open', sidebarCollapsed && 'collapsed'].filter(Boolean).join(' ');
@@ -97,7 +97,11 @@ export function Sidebar() {
     <aside className={sidebarClass} id="sidebar">
       <div className="sidebar-brand">
         <div className="brand-logo-text" id="brandLogo">
-          <img src="/rc-logo.png" alt="Red Castle Services" className="brand-logo-img" />
+          {agency?.logo_url ? (
+            <img src={agency.logo_url} alt={agency.agency_name || 'Agency'} className="brand-logo-img" />
+          ) : (
+            <img src="/rc-logo.png" alt="Red Castle Services" className="brand-logo-img" />
+          )}
         </div>
       </div>
 
