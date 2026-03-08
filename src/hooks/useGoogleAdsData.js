@@ -68,6 +68,11 @@ function addMetrics(o) {
 export function useGoogleAdsData() {
   const { canViewAllCustomers, allowedClientAccounts } = useAuth();
 
+  const allowedClientAccountsRef = useRef(allowedClientAccounts);
+  allowedClientAccountsRef.current = allowedClientAccounts;
+
+  const fetchInProgressRef = useRef(false);
+
   const [filters, setFilters] = useState({
     datePreset: 'this_month', dateFrom: '', dateTo: '',
     compareOn: false, compareFrom: '', compareTo: '',
@@ -107,6 +112,8 @@ export function useGoogleAdsData() {
   }, []);
 
   const fetchData = useCallback(async () => {
+    if (fetchInProgressRef.current) return;
+    fetchInProgressRef.current = true;
     const f = filtersRef.current;
     setLoading(true);
     setError(null);
@@ -138,7 +145,7 @@ export function useGoogleAdsData() {
           });
           setClientOptions(options);
         } else {
-          const gadsAccounts = (allowedClientAccounts || []).filter((a) => a.platform === 'google_ads');
+          const gadsAccounts = (allowedClientAccountsRef.current || []).filter((a) => a.platform === 'google_ads');
           if (gadsAccounts.length === 0) {
             cid = '__NONE__';
             setClientOptions([{ id: '__NONE__', name: 'No accounts assigned. Contact admin.' }]);
@@ -192,14 +199,14 @@ export function useGoogleAdsData() {
       const resolveCustomerFilter = () => {
         if (cid === 'ALL') {
           if (!canViewAllCustomers) {
-            const ids = (allowedClientAccounts || []).filter((a) => a.platform === 'google_ads').map((a) => a.platform_customer_id);
+            const ids = (allowedClientAccountsRef.current || []).filter((a) => a.platform === 'google_ads').map((a) => a.platform_customer_id);
             return ids.length ? { customerIds: ids } : { customerIds: [NO_MATCH_ID] };
           }
           return {};
         }
         if (cid === '__NONE__') return { customerIds: [NO_MATCH_ID] };
         if (cid === 'ALL_MINE') {
-          const ids = (allowedClientAccounts || []).filter((a) => a.platform === 'google_ads').map((a) => a.platform_customer_id);
+          const ids = (allowedClientAccountsRef.current || []).filter((a) => a.platform === 'google_ads').map((a) => a.platform_customer_id);
           return ids.length ? { customerIds: ids } : { customerIds: [NO_MATCH_ID] };
         }
         return { customerId: cid };
@@ -297,11 +304,12 @@ export function useGoogleAdsData() {
           : msg
       );
     } finally {
+      fetchInProgressRef.current = false;
       setLoading(false);
     }
-  }, [canViewAllCustomers, allowedClientAccounts]);
+  }, [canViewAllCustomers]);
 
-  useEffect(() => { optionsLoaded.current = false; }, [canViewAllCustomers, allowedClientAccounts]);
+  useEffect(() => { optionsLoaded.current = false; }, [canViewAllCustomers]);
   useEffect(() => { fetchData(); }, [fetchData]);
 
   /* ── KPIs ── */

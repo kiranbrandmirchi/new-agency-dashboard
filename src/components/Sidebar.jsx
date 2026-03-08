@@ -1,3 +1,4 @@
+import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
@@ -84,7 +85,7 @@ function groupBySection(items) {
 
 const sections = groupBySection(NAV_ITEMS);
 
-export function Sidebar() {
+export const Sidebar = React.memo(function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const { currentPage, showPage, sidebarOpen, sidebarCollapsed } = useApp();
@@ -158,4 +159,4 @@ export function Sidebar() {
       )}
     </aside>
   );
-}
+});

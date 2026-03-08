@@ -1,7 +1,20 @@
-import { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { supabase } from '../lib/supabaseClient';
 
 const AuthContext = createContext(null);
+
+function stableSetKey(s) {
+  if (!s || !(s instanceof Set)) return '';
+  return [...s].sort().join(',');
+}
+function stableArrayKey(arr) {
+  if (!arr || !Array.isArray(arr)) return '';
+  return JSON.stringify(arr);
+}
+function stableObjKey(obj) {
+  if (!obj || typeof obj !== 'object') return '';
+  return JSON.stringify(obj);
+}
 
 const AUTH_DISABLED =
   ['true', '1', 'yes'].includes(String(import.meta.env.VITE_AUTH_DISABLED || '').toLowerCase()) ||
@@ -36,6 +49,36 @@ export function AuthProvider({ children }) {
   const [profileLoaded, setProfileLoaded] = useState(false);
   const lastProfileLoad = useRef({ userId: null, at: 0 });
   const PROFILE_LOAD_DEBOUNCE_MS = 2000;
+
+  const prevAllowedClientAccounts = useRef('');
+  const prevAllowedClients = useRef('');
+  const prevAllowedPlatformAccounts = useRef('');
+  const prevPermissions = useRef('');
+
+  const setAllowedClientAccountsStable = useCallback((val) => {
+    const key = stableArrayKey(val);
+    if (prevAllowedClientAccounts.current === key) return;
+    prevAllowedClientAccounts.current = key;
+    setAllowedClientAccounts(val);
+  }, []);
+  const setAllowedClientsStable = useCallback((val) => {
+    const key = stableArrayKey(val);
+    if (prevAllowedClients.current === key) return;
+    prevAllowedClients.current = key;
+    setAllowedClients(val);
+  }, []);
+  const setAllowedPlatformAccountsStable = useCallback((val) => {
+    const key = stableObjKey(val);
+    if (prevAllowedPlatformAccounts.current === key) return;
+    prevAllowedPlatformAccounts.current = key;
+    setAllowedPlatformAccounts(val);
+  }, []);
+  const setPermissionsStable = useCallback((val) => {
+    const key = stableSetKey(val);
+    if (prevPermissions.current === key) return;
+    prevPermissions.current = key;
+    setPermissions(val);
+  }, []);
 
   const isAuthenticated = !!session && !authError;
   const isActive = !authError || authError === 'pending';
@@ -76,10 +119,10 @@ export function AuthProvider({ children }) {
           setUserRole('');
           setAgencyId(null);
           setAgency(null);
-          setPermissions(new Set(['sidebar.settings', 'tab.combined_dashboard', 'sidebar.google_ads']));
-          setAllowedClients([]);
-          setAllowedPlatformAccounts({});
-          setAllowedClientAccounts([]);
+          setPermissionsStable(new Set(['sidebar.settings', 'tab.combined_dashboard', 'sidebar.google_ads']));
+          setAllowedClientsStable([]);
+          setAllowedPlatformAccountsStable({});
+          setAllowedClientAccountsStable([]);
           setCanViewAllCustomers(false);
           setAuthError(null);
         } else {
@@ -111,7 +154,7 @@ export function AuthProvider({ children }) {
       (rolePerms || []).forEach((r) => {
         if (r.permissions?.permission_key) permSet.add(r.permissions.permission_key);
       });
-      setPermissions(permSet);
+      setPermissionsStable(permSet);
       setAuthError(null);
 
       let cpaQuery = supabase.from('client_platform_accounts').select('id,platform_customer_id,account_name,platform,agency_id').eq('is_active', true);
@@ -143,9 +186,9 @@ export function AuthProvider({ children }) {
         }
       });
 
-      setAllowedClients(clients);
-      setAllowedPlatformAccounts(platformMap);
-      setAllowedClientAccounts(clientAccounts);
+      setAllowedClientsStable(clients);
+      setAllowedPlatformAccountsStable(platformMap);
+      setAllowedClientAccountsStable(clientAccounts);
       setProfileLoaded(true);
 
       if (profile.agencies) {
@@ -176,11 +219,11 @@ export function AuthProvider({ children }) {
       setUserRole('admin');
       setUserName('Public');
       setUserEmail('public');
-      setPermissions(new Set(['sidebar.google_ads', 'tab.campaigns', 'tab.geo', 'customer.view_all']));
+      setPermissionsStable(new Set(['sidebar.google_ads', 'tab.campaigns', 'tab.geo', 'customer.view_all']));
       setCanViewAllCustomers(true);
-      setAllowedClients([]);
-      setAllowedPlatformAccounts({});
-      setAllowedClientAccounts([]);
+      setAllowedClientsStable([]);
+      setAllowedPlatformAccountsStable({});
+      setAllowedClientAccountsStable([]);
       setProfileLoaded(true);
       return;
     }
@@ -223,10 +266,10 @@ export function AuthProvider({ children }) {
         setUserRole('');
         setUserName('');
         setUserEmail('');
-        setPermissions(new Set());
-        setAllowedClients([]);
-        setAllowedPlatformAccounts({});
-        setAllowedClientAccounts([]);
+        setPermissionsStable(new Set());
+        setAllowedClientsStable([]);
+        setAllowedPlatformAccountsStable({});
+        setAllowedClientAccountsStable([]);
         setCanViewAllCustomers(false);
         setLoading(false);
       }
@@ -298,6 +341,10 @@ export function AuthProvider({ children }) {
     setUserRole('');
     setUserName('');
     setUserEmail('');
+    prevPermissions.current = '';
+    prevAllowedClients.current = '';
+    prevAllowedPlatformAccounts.current = '';
+    prevAllowedClientAccounts.current = '';
     setPermissions(new Set());
     setAllowedClients([]);
     setAllowedPlatformAccounts({});
@@ -307,7 +354,7 @@ export function AuthProvider({ children }) {
     setAuthError(null);
   }, []);
 
-  const value = {
+  const value = useMemo(() => ({
     user,
     session,
     loading,
@@ -329,7 +376,29 @@ export function AuthProvider({ children }) {
     signIn,
     signUp,
     signOut,
-  };
+  }), [
+    user,
+    session,
+    loading,
+    authError,
+    isAuthenticated,
+    userProfile,
+    userRole,
+    userName,
+    userEmail,
+    agencyId,
+    agency,
+    permissions,
+    allowedClients,
+    allowedPlatformAccounts,
+    allowedClientAccounts,
+    canViewAllCustomers,
+    hasPermission,
+    isCustomerAllowed,
+    signIn,
+    signUp,
+    signOut,
+  ]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

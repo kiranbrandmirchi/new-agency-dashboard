@@ -1,9 +1,10 @@
+import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { PermissionGate } from './PermissionGate';
 
-export function Header() {
+export const Header = React.memo(function Header() {
   const navigate = useNavigate();
   const location = useLocation();
   const { headerTitle, toggleSidebar, sidebarCollapsed, collapseSidebar, showNotification, clients, currentClient, handleClientChange } = useApp();
@@ -88,4 +89,4 @@ export function Header() {
       </div>
     </header>
   );
-}
+});

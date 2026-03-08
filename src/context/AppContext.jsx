@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { PAGE_TITLES } from '../data/staticData';
 import { useAuth } from './AuthContext';
 
@@ -145,7 +145,15 @@ export function AppProvider({ children }) {
     if (logo) setBranding((b) => ({ ...b, agencyLogo: logo }));
   }, []);
 
-  const value = {
+  const clients = useMemo(() => [
+    { id: null, name: 'Select Client...' },
+    ...(allowedClientAccounts || []).map((a) => ({
+      id: a.platform_customer_id,
+      name: a.account_name || a.client_name || a.platform_customer_id,
+    })),
+  ], [allowedClientAccounts]);
+
+  const value = useMemo(() => ({
     currentPage,
     setCurrentPage,
     showPage,
@@ -164,14 +172,23 @@ export function AppProvider({ children }) {
     colors,
     updateColors,
     resetSettings,
-    clients: [
-      { id: null, name: 'Select Client...' },
-      ...(allowedClientAccounts || []).map((a) => ({
-        id: a.platform_customer_id,
-        name: a.account_name || a.client_name || a.platform_customer_id,
-      })),
-    ],
-  };
+    clients,
+  }), [
+    currentPage,
+    showPage,
+    headerTitle,
+    sidebarOpen,
+    sidebarCollapsed,
+    currentClient,
+    handleClientChange,
+    showNotification,
+    branding,
+    colors,
+    updateBranding,
+    updateColors,
+    resetSettings,
+    clients,
+  ]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

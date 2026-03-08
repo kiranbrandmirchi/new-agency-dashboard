@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import { useApp } from './context/AppContext';
@@ -49,11 +49,10 @@ function CurrentPage() {
   return <CombinedDashboardPage />;
 }
 
-function DashboardLayoutContent() {
-  const location = useLocation();
+const DashboardLayoutContent = React.memo(function DashboardLayoutContent({ currentPage, pathname }) {
   const { hasPermission } = useAuth();
 
-  if (location.pathname === '/admin') {
+  if (pathname === '/admin') {
     if (!hasPermission('action.manage_users')) {
       return (
         <div className="page-content">
@@ -68,11 +67,12 @@ function DashboardLayoutContent() {
   }
 
   return <CurrentPage />;
-}
+});
 
 function DashboardLayout() {
-  const { showNotification } = useApp();
+  const { showNotification, currentPage } = useApp();
   const { userName } = useAuth();
+  const location = useLocation();
   const welcomeShown = useRef(false);
 
   useEffect(() => {
@@ -87,7 +87,7 @@ function DashboardLayout() {
       <Sidebar />
       <main className="main-content">
         <Header />
-        <DashboardLayoutContent />
+        <DashboardLayoutContent currentPage={currentPage} pathname={location.pathname} />
       </main>
       <NotificationContainer />
     </div>
