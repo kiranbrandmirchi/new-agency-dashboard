@@ -133,7 +133,7 @@ function SortTh({ label, col, sort, onSort, align }) {
 export function GoogleAdsPage() {
   const { hasPermission } = useAuth();
   const { tabs: configuredTabs } = useAgencyReportTabs('google_ads');
-  const { filters, updateFilter, batchUpdateFilters, fetchData, loading, error, customers, channelTypes, showAllClientsOption, kpis, compareKpis, campaignTypes, campaigns, adGroups, keywords, searchTerms, geoData, conversionsData, dailyTrends, compareDailyTrends, dailyBreakdown } = useGoogleAdsData();
+  const { filters, updateFilter, batchUpdateFilters, fetchData, loading, loadingPhase, error, customers, channelTypes, showAllClientsOption, kpis, compareKpis, campaignTypes, campaigns, adGroups, keywords, searchTerms, geoData, conversionsData, dailyTrends, compareDailyTrends, dailyBreakdown } = useGoogleAdsData();
 
   const permittedTabs = configuredTabs.filter((t) => !t.permission || hasPermission(t.permission));
   const defaultTab = permittedTabs[0]?.id || 'daily';
@@ -378,7 +378,9 @@ export function GoogleAdsPage() {
 
   /* ── Geo Columns ── */
   const geoCols = [
-    { col: 'location', label: 'Location', dim: true, cell: (r) => r.location, total: () => 'Total' },
+    { col: 'location', label: 'Location', dim: true, clamp: true, cell: (r) => r.location, total: () => 'Total' },
+    { col: 'geo_type', label: 'Type', dim: true, cell: (r) => r.geo_type ? <span className="badge badge-blue">{r.geo_type}</span> : '', total: () => '' },
+    { col: 'country', label: 'Country', dim: true, clamp: true, cell: (r) => r.country || r.country_code || '—', total: () => '' },
     { col: 'impressions', label: 'Impr.', align: 'r', cell: (r) => fI(r.impressions), total: (t) => fI(t.impressions) },
     { col: 'clicks', label: 'Clicks', align: 'r', cell: (r) => fI(r.clicks), total: (t) => fI(t.clicks) },
     { col: 'ctr', label: 'CTR', align: 'r', cell: (r) => fP(r.ctr), total: (t) => fP(t.ctr) },
@@ -791,7 +793,7 @@ export function GoogleAdsPage() {
 
         {/* ── Tab Content ── */}
         <div id="gads-tab-content">
-          {loading && <div className="gads-loading"><div className="gads-spinner" /> Loading data...</div>}
+          {loading && <div className="gads-loading"><div className="gads-spinner" /> {loadingPhase || 'Loading data…'}</div>}
 
           {!loading && activeTab === 'daily' && renderTable('daily', dailyBreakdown || [], dailyBreakdownCols, {
             rowKey: (r) => 'd_' + r.date,

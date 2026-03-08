@@ -52,7 +52,8 @@ Deno.serve(async (req)=>{
     const dateFrom = body.date_from || "";
     const dateTo = body.date_to || "";
     const daysBack = body.days_back || 3;
-    const customerId = body.customer_id || null;
+    const customerIdRaw = body.customer_id || null;
+    const customerId = customerIdRaw ? String(customerIdRaw).replace(/-/g, "") : null;
     const listOnly = body.list_only || false;
     log("=== GADS FULL SYNC ===");
     log("Mode: " + mode + " | listOnly: " + listOnly);
@@ -61,13 +62,20 @@ Deno.serve(async (req)=>{
     let MCC_ID = "";
     if (customerId && !listOnly) {
       // For per-customer sync, look up credential via the customer's agency
-      const credRes = await fetch(SB_URL + "/rest/v1/client_platform_accounts?" + "platform_customer_id=eq." + String(customerId).replace(/-/g, "") + "&platform=eq.google_ads&is_active=eq.true" + "&select=credential_id,agency_id", {
+      // Try normalized ID first; if not found and raw had dashes, try raw (platform_customer_id may be stored with dashes)
+      let credRes = await fetch(SB_URL + "/rest/v1/client_platform_accounts?" + "platform_customer_id=eq." + encodeURIComponent(customerId) + "&platform=eq.google_ads&is_active=eq.true" + "&select=credential_id,agency_id", {
         headers: {
           "apikey": SB_KEY,
           "Authorization": "Bearer " + SB_KEY
         }
       });
-      const cpaRows = await credRes.json();
+      let cpaRows = await credRes.json();
+      if ((!cpaRows || cpaRows.length === 0) && customerIdRaw && String(customerIdRaw) !== customerId) {
+        credRes = await fetch(SB_URL + "/rest/v1/client_platform_accounts?" + "platform_customer_id=eq." + encodeURIComponent(String(customerIdRaw)) + "&platform=eq.google_ads&is_active=eq.true" + "&select=credential_id,agency_id", {
+          headers: { "apikey": SB_KEY, "Authorization": "Bearer " + SB_KEY }
+        });
+        cpaRows = await credRes.json();
+      }
       if (!cpaRows || cpaRows.length === 0) {
         log("ERROR: No client_platform_account for customer " + customerId);
         return textResponse(L.join("\n"), 400);

@@ -4,8 +4,9 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 const PAGE_SIZE = 1000;
-const MAX_RETRIES = 4;
-const RETRY_DELAY = 800;
+const MAX_ROWS_PER_TABLE = 15000;
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 500;
 
 async function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -73,10 +74,11 @@ export async function sbFetchAll(endpoint) {
     return firstData;
   }
 
+  const maxPages = Math.ceil(MAX_ROWS_PER_TABLE / PAGE_SIZE);
   if (totalCount && totalCount > PAGE_SIZE) {
     const all = [...firstData];
-    const pages = Math.ceil(totalCount / PAGE_SIZE);
-    const BATCH = 3;
+    const pages = Math.min(Math.ceil(totalCount / PAGE_SIZE), maxPages);
+    const BATCH = 4;
 
     for (let batch = 1; batch < pages; batch += BATCH) {
       const promises = [];
@@ -90,13 +92,15 @@ export async function sbFetchAll(endpoint) {
         if (Array.isArray(r.data) && r.data.length > 0) all.push(...r.data);
       }
     }
-    console.log(`[Supabase] ${endpoint.split('?')[0]}: fetched ${all.length}/${totalCount} rows`);
+    if (all.length < totalCount) {
+      console.log(`[Supabase] ${endpoint.split('?')[0]}: fetched ${all.length}/${totalCount} rows (capped at ${MAX_ROWS_PER_TABLE})`);
+    }
     return all;
   }
 
   const all = [...firstData];
   let offset = PAGE_SIZE;
-  while (true) {
+  while (all.length < MAX_ROWS_PER_TABLE) {
     const { data } = await fetchWithRetry(baseUrl + sep + 'limit=' + PAGE_SIZE + '&offset=' + offset);
     if (!Array.isArray(data) || data.length === 0) break;
     all.push(...data);
@@ -110,12 +114,22 @@ export async function sbFetchAllParallel(endpoint) {
   return sbFetchAll(endpoint);
 }
 
+/** Normalize Google Ads customer ID (strip dashes) for consistent DB matching */
+function normalizeCustomerId(id) {
+  if (id == null || id === '') return id;
+  return String(id).replace(/-/g, '');
+}
+
 export function buildQuery(table, { customerId, customerIds, dateFrom, dateTo, extra } = {}) {
   let q = table + '?select=*';
   if (customerIds && Array.isArray(customerIds) && customerIds.length > 0) {
-    q += '&customer_id=in.(' + customerIds.join(',') + ')';
+    const normalized = customerIds.map(normalizeCustomerId).filter(Boolean);
+    if (normalized.length > 0) {
+      q += '&customer_id=in.(' + normalized.join(',') + ')';
+    }
   } else if (customerId && customerId !== 'ALL' && customerId !== 'ALL_MINE') {
-    q += '&customer_id=eq.' + customerId;
+    const nid = normalizeCustomerId(customerId);
+    if (nid) q += '&customer_id=eq.' + nid;
   }
   if (dateFrom) q += '&date=gte.' + dateFrom;
   if (dateTo) q += '&date=lte.' + dateTo;

@@ -154,3 +154,93 @@ function buildChunks(from, to, chunkDays) {
 
   return chunks;
 }
+
+/**
+ * Syncs campaign, ad group, and keyword status via gads-status-geo.
+ * @param {Object} params
+ * @param {string} params.customerId
+ * @param {string} params.accessToken
+ * @returns {Promise<{campaigns: boolean, adgroups: boolean, keywords: boolean}>}
+ */
+export async function syncStatusAndGeo({ customerId, accessToken }) {
+  const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+  if (!SUPABASE_URL) throw new Error('VITE_SUPABASE_URL not configured');
+
+  const result = { campaigns: false, adgroups: false, keywords: false };
+  const types = ['campaigns', 'adgroups', 'keywords'];
+
+  for (const syncType of types) {
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/gads-status-geo`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ customer_id: customerId, sync_type: syncType }),
+      });
+      result[syncType] = res.ok;
+    } catch {
+      result[syncType] = false;
+    }
+  }
+  return result;
+}
+
+/**
+ * Syncs geo data for a date range via gads-status-geo.
+ * @param {Object} params
+ * @param {string} params.customerId
+ * @param {string} params.dateFrom - YYYY-MM-DD
+ * @param {string} params.dateTo - YYYY-MM-DD
+ * @param {string} params.accessToken
+ * @returns {Promise<{success: boolean}>}
+ */
+export async function syncGeo({ customerId, dateFrom, dateTo, accessToken }) {
+  const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+  if (!SUPABASE_URL) throw new Error('VITE_SUPABASE_URL not configured');
+
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/gads-status-geo`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        customer_id: customerId,
+        date_from: dateFrom,
+        date_to: dateTo,
+        sync_type: 'geo',
+      }),
+    });
+    return { success: res.ok };
+  } catch {
+    return { success: false };
+  }
+}
+
+/**
+ * Resolves geo location names via gads-geo-resolve.
+ * @param {Object} params
+ * @param {string} params.accessToken
+ * @returns {Promise<{success: boolean}>}
+ */
+export async function resolveGeo({ accessToken }) {
+  const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+  if (!SUPABASE_URL) throw new Error('VITE_SUPABASE_URL not configured');
+
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/gads-geo-resolve`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({}),
+    });
+    return { success: res.ok };
+  } catch {
+    return { success: false };
+  }
+}

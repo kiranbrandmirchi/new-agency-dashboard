@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
-import { sbFetchAll, sbFetchAllParallel, buildQuery } from '../lib/supabaseRest';
+import { sbFetchAllParallel, buildQuery } from '../lib/supabaseRest';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../context/AuthContext';
 
@@ -80,12 +80,14 @@ export function useGoogleAdsData() {
   const [rawKeywords, setRawKeywords] = useState([]);
   const [rawSearchTerms, setRawSearchTerms] = useState([]);
   const [rawGeo, setRawGeo] = useState([]);
+  const [geoConstants, setGeoConstants] = useState([]);
   const [rawConversions, setRawConversions] = useState([]);
   const [rawCompareCampaigns, setRawCompareCampaigns] = useState([]);
   const [campaignStatusMap, setCampaignStatusMap] = useState(new Map());
   const [clientOptions, setClientOptions] = useState([]);
   const [channelTypes, setChannelTypes] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingPhase, setLoadingPhase] = useState('');
   const [error, setError] = useState(null);
 
   const optionsLoaded = useRef(false);
@@ -108,6 +110,7 @@ export function useGoogleAdsData() {
     const f = filtersRef.current;
     setLoading(true);
     setError(null);
+    setLoadingPhase('Loading accounts…');
     try {
       const { from, to } = computeDateRange(f.datePreset, f.dateFrom, f.dateTo);
       let cid = f.customerId;
@@ -212,21 +215,26 @@ export function useGoogleAdsData() {
       const statusParams = baseFilter;
       const qParamsCompare = { ...baseFilter, dateFrom: compFrom, dateTo: compTo, extra: campaignExtra };
 
+      setLoadingPhase('Loading campaigns…');
       const [campaignData, statusData] = await Promise.all([
         safe(sbFetchAllParallel(buildQuery('gads_campaign_daily', qParams))),
         safe(sbFetchAllParallel(buildQuery('gads_campaign_status', statusParams))),
       ]);
 
+      setLoadingPhase('Loading ad groups, keywords…');
       const [adGroupData, keywordData, searchTermData] = await Promise.all([
         safe(sbFetchAllParallel(buildQuery('gads_adgroup_daily', queryParams(adGroupExtra)))),
         safe(sbFetchAllParallel(buildQuery('gads_keyword_daily', queryParams(keywordExtra)))),
         safe(sbFetchAllParallel(buildQuery('gads_search_term_daily', queryParams('&order=date.desc')))),
       ]);
 
-      const [geoData, conversionData] = await Promise.all([
+      setLoadingPhase('Loading geo, conversions…');
+      const [geoData, geoConstData, conversionData] = await Promise.all([
         safe(sbFetchAllParallel(buildQuery('gads_geo_location_daily', queryParams('&order=date.desc')))),
+        safe(sbFetchAllParallel('gads_geo_constants?select=geo_id,geo_name,canonical_name,target_type,country_code')),
         safe(sbFetchAllParallel(buildQuery('gads_conversion_daily', queryParams('&order=date.desc')))),
       ]);
+      setGeoConstants(Array.isArray(geoConstData) ? geoConstData : []);
 
       let compareCampaignData = [];
       if (f.compareOn && compFrom && compTo) {
@@ -243,19 +251,14 @@ export function useGoogleAdsData() {
         statuses: statusData.length,
         dateRange: { from, to },
       });
-      if (campaignData.length > 0) console.log('[GAds] Sample campaign row:', campaignData[0]);
-
-      if (campaignData.length === 0 && statusData.length === 0) {
-        console.warn('[GAds] All tables returned 0 rows. Check RLS policies or ensure tables have data.');
-      }
 
       const statusMap = new Map();
-      statusData.forEach((s) => statusMap.set(String(s.campaign_id), s));
+      (statusData || []).forEach((s) => statusMap.set(String(s.campaign_id), s));
       setCampaignStatusMap(statusMap);
 
       let validCampaignIds = null;
       if (f.channelType !== 'all' || f.status !== 'all') {
-        const filtered = statusData.filter((s) => {
+        const filtered = (statusData || []).filter((s) => {
           if (f.channelType !== 'all' && s.campaign_type !== f.channelType) return false;
           if (f.status !== 'all' && s.campaign_status !== f.status) return false;
           return true;
@@ -269,14 +272,18 @@ export function useGoogleAdsData() {
       setRawCampaigns(filterByCampaign(campaignData));
       setRawAdGroups(filterByCampaign(adGroupData));
       setRawKeywords(filterByCampaign(keywordData));
-      setRawSearchTerms(filterByCampaign(searchTermData));
-      setRawGeo(filterByCampaign(geoData));
+      setRawSearchTerms(Array.isArray(searchTermData) ? searchTermData : []);
+      setRawGeo(Array.isArray(geoData) ? geoData : []);
       setRawConversions(filterByCampaign(conversionData));
       setRawCompareCampaigns(f.compareOn ? filterByCampaign(compareCampaignData) : []);
 
+      if (campaignData.length === 0 && (statusData || []).length === 0) {
+        console.warn('[GAds] All tables returned 0 rows. Check RLS policies or ensure tables have data.');
+      }
+
       if (!optionsLoaded.current) {
         const types = new Set();
-        statusData.forEach((s) => { if (s.campaign_type) types.add(s.campaign_type); });
+        (statusData || []).forEach((s) => { if (s.campaign_type) types.add(s.campaign_type); });
         if (types.size === 0) campaignData.forEach((r) => { if (r.campaign_type) types.add(r.campaign_type); });
         setChannelTypes([...types].sort());
         optionsLoaded.current = true;
@@ -470,16 +477,50 @@ export function useGoogleAdsData() {
     return [...map.values()].map(addMetrics).sort((a, b) => b.cost - a.cost);
   }, [rawSearchTerms, rawKeywords]);
 
-  /* ── Geo ── */
+  /* ── Geo (resolve IDs via gads_geo_constants, use canonical_name; fallback to raw IDs) ── */
   const geoAgg = useMemo(() => {
+    if (!rawGeo || rawGeo.length === 0) return [];
+
+    const geoLookup = new Map();
+    (geoConstants || []).forEach((g) => {
+      const id = String(g.geo_id || '').trim();
+      const name = g.canonical_name || g.geo_name || g.geo_id || '';
+      const rec = { name, target_type: g.target_type || '', country_code: g.country_code || '' };
+      geoLookup.set(id, rec);
+      if (id.includes('/')) geoLookup.set(id.split('/').pop() || id, rec);
+    });
+    const toId = (v) => {
+      if (v == null || v === '') return '';
+      const s = String(v).trim();
+      const parts = s.split('/');
+      return (parts[parts.length - 1] || s).trim();
+    };
+    const resolve = (id) => {
+      const k = toId(id) || String(id);
+      return geoLookup.get(k)?.name || geoLookup.get(String(id))?.name || '';
+    };
+    const getRec = (id) => {
+      const k = toId(id) || String(id);
+      return geoLookup.get(k) || geoLookup.get(String(id));
+    };
+
     const map = new Map();
     rawGeo.forEach((r) => {
-      const loc = r.most_specific || r.city || r.region || r.country || 'Unknown';
+      if (!r || typeof r !== 'object') return;
+      const locId = r.most_specific || r.city || r.region || r.country || '';
+      const loc = resolve(locId) || locId || 'Unknown';
+      const countryId = r.country || '';
+      const countryName = resolve(countryId) || countryId || '';
+      const countryCode = getRec(countryId)?.country_code || '';
+      const targetType = getRec(locId)?.target_type || '';
+
       if (!map.has(loc)) map.set(loc, {
         location: loc,
-        country: r.country || '',
-        region: r.region || '',
-        city: r.city || '',
+        location_id: locId,
+        geo_type: targetType,
+        country: countryName,
+        country_code: countryCode,
+        country_id: countryId,
         cost: 0, clicks: 0, impressions: 0, conversions: 0, conversions_value: 0,
       });
       const a = map.get(loc);
@@ -490,7 +531,7 @@ export function useGoogleAdsData() {
       a.conversions_value += num(r.conversions_value);
     });
     return [...map.values()].map(addMetrics).sort((a, b) => b.cost - a.cost);
-  }, [rawGeo]);
+  }, [rawGeo, geoConstants]);
 
   /* ── Conversions ── */
   const conversionsAgg = useMemo(() => {
@@ -608,7 +649,7 @@ export function useGoogleAdsData() {
 
   return {
     filters, updateFilter, batchUpdateFilters, fetchData,
-    loading, error, customers, channelTypes, showAllClientsOption,
+    loading, loadingPhase, error, customers, channelTypes, showAllClientsOption,
     kpis, compareKpis,
     campaignTypes: campaignTypesAgg,
     campaigns: campaignsAgg,

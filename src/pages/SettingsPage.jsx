@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabaseClient';
-import { syncWithChunking } from '../utils/syncHelper';
+import { syncWithChunking, syncStatusAndGeo, syncGeo, resolveGeo } from '../utils/syncHelper';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 
@@ -179,6 +179,32 @@ export function SettingsPage() {
       } else {
         showNotification(`Sync completed with errors: ${result.totalRows} rows. ${result.errors.length} chunk(s) failed.`);
       }
+
+      const token = session.access_token;
+
+      try {
+        const statusResult = await syncStatusAndGeo({ customerId: account.platform_customer_id, accessToken: token });
+        if (statusResult.campaigns || statusResult.adgroups || statusResult.keywords) {
+          showNotification('Status synced');
+        }
+      } catch (e) {
+        console.warn('[Settings] syncStatusAndGeo:', e);
+      }
+
+      try {
+        const geoResult = await syncGeo({ customerId: account.platform_customer_id, dateFrom, dateTo, accessToken: token });
+        if (geoResult.success) showNotification('Geo synced');
+      } catch (e) {
+        console.warn('[Settings] syncGeo:', e);
+      }
+
+      try {
+        const resolveResult = await resolveGeo({ accessToken: token });
+        if (resolveResult.success) showNotification('Geo names resolved');
+      } catch (e) {
+        console.warn('[Settings] resolveGeo:', e);
+      }
+
       await fetchAccounts();
       await fetchSyncLogs(account.platform_customer_id);
     } catch (err) {
@@ -230,6 +256,29 @@ export function SettingsPage() {
         totalRowsAll += result.totalRows;
         if (result.success) successCount++;
         else failCount++;
+
+        const token = session.access_token;
+        try {
+          const statusResult = await syncStatusAndGeo({ customerId: account.platform_customer_id, accessToken: token });
+          if (statusResult.campaigns || statusResult.adgroups || statusResult.keywords) {
+            showNotification('Status synced');
+          }
+        } catch (e) {
+          console.warn('[Settings] syncStatusAndGeo:', e);
+        }
+        try {
+          const geoResult = await syncGeo({ customerId: account.platform_customer_id, dateFrom, dateTo, accessToken: token });
+          if (geoResult.success) showNotification('Geo synced');
+        } catch (e) {
+          console.warn('[Settings] syncGeo:', e);
+        }
+        try {
+          const resolveResult = await resolveGeo({ accessToken: token });
+          if (resolveResult.success) showNotification('Geo names resolved');
+        } catch (e) {
+          console.warn('[Settings] resolveGeo:', e);
+        }
+
         await fetchSyncLogs(account.platform_customer_id);
       } catch {
         failCount++;
