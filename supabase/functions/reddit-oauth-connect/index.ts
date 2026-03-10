@@ -40,14 +40,30 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: "Not authenticated" }, 401);
     }
 
-    const { data: profile, error: profileErr } = await sb
+    let { data: profile, error: profileErr } = await sb
       .from("user_profiles")
       .select("id, agency_id, is_super_admin, role_id, roles(role_name)")
       .eq("id", user.id)
       .single();
 
     if (profileErr || !profile) {
-      return jsonResponse({ error: "User profile not found" }, 403);
+      const { data: defaultRole } = await sb.from("roles").select("id").eq("role_name", "viewer").limit(1).maybeSingle();
+      const roleId = defaultRole?.id ?? (await sb.from("roles").select("id").limit(1).maybeSingle()).data?.id;
+      if (roleId) {
+        const { error: upsertErr } = await sb.from("user_profiles").upsert({
+          id: user.id,
+          email: user.email ?? null,
+          full_name: (user.user_metadata as Record<string, unknown>)?.full_name as string ?? null,
+          role_id: roleId,
+        }, { onConflict: "id", ignoreDuplicates: true });
+        if (!upsertErr) {
+          const retry = await sb.from("user_profiles").select("id, agency_id, is_super_admin, role_id, roles(role_name)").eq("id", user.id).single();
+          profile = retry.data;
+        }
+      }
+    }
+    if (!profile) {
+      return jsonResponse({ error: "User profile not found. Please contact your administrator to set up your account." }, 403);
     }
 
     const roleName = (profile.roles?.role_name ?? "").toLowerCase();
