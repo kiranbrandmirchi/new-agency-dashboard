@@ -27,7 +27,7 @@ function getDateRangeFromPreset(presetKey) {
 
 export function SettingsPage() {
   const { showNotification } = useApp();
-  const { signOut, agencyId, agency, userProfile, userRole } = useAuth();
+  const { signOut, activeAgencyId, activeAgency, userProfile, userRole } = useAuth();
 
   const [credentials, setCredentials] = useState([]);
   const [accounts, setAccounts] = useState([]);
@@ -50,8 +50,10 @@ export function SettingsPage() {
     sidebar_bg: '', sidebar_text: '', font_family: '', logo_url: '',
   });
   const [savingAgency, setSavingAgency] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
 
   const isAdmin = ['super_admin', 'admin'].includes(userRole?.toLowerCase());
+  const isSuperAdmin = userProfile?.is_super_admin || userRole?.toLowerCase() === 'super_admin';
   const redirectUri = typeof window !== 'undefined'
     ? `${window.location.origin}/oauth/callback`
     : 'http://localhost:5173/oauth/callback';
@@ -65,40 +67,48 @@ export function SettingsPage() {
   }, [datePreset, customDateFrom, customDateTo]);
 
   const fetchCredentials = useCallback(async () => {
-    if (!agencyId) return;
+    if (!activeAgencyId) {
+      setLoadingCreds(false);
+      setCredentials([]);
+      return;
+    }
     setLoadingCreds(true);
     try {
       const { data, error } = await supabase
-        .from('agency_platform_credentials').select('*').eq('agency_id', agencyId);
+        .from('agency_platform_credentials').select('*').eq('agency_id', activeAgencyId);
       if (error) throw error;
       setCredentials(data || []);
     } catch (err) {
       console.warn('[Settings] credentials error:', err);
       setCredentials([]);
     } finally { setLoadingCreds(false); }
-  }, [agencyId]);
+  }, [activeAgencyId]);
 
   const fetchAccounts = useCallback(async () => {
-    if (!agencyId) return;
+    if (!activeAgencyId) {
+      setLoadingAccounts(false);
+      setAccounts([]);
+      return;
+    }
     setLoadingAccounts(true);
     try {
       const { data, error } = await supabase
-        .from('client_platform_accounts').select('*').eq('agency_id', agencyId).order('account_name');
+        .from('client_platform_accounts').select('*').eq('agency_id', activeAgencyId).order('account_name');
       if (error) throw error;
       setAccounts(data || []);
     } catch (err) {
       console.warn('[Settings] accounts error:', err);
       setAccounts([]);
     } finally { setLoadingAccounts(false); }
-  }, [agencyId]);
+  }, [activeAgencyId]);
 
   const fetchSyncLogs = useCallback(async (customerId) => {
-    if (!agencyId) return;
+    if (!activeAgencyId) return;
     try {
       const { data, error } = await supabase
         .from('sync_log')
         .select('*')
-        .eq('agency_id', agencyId)
+        .eq('agency_id', activeAgencyId)
         .eq('customer_id', customerId)
         .order('started_at', { ascending: false })
         .limit(20);
@@ -107,31 +117,31 @@ export function SettingsPage() {
     } catch (err) {
       console.warn('[Settings] sync_log error:', err);
     }
-  }, [agencyId]);
+  }, [activeAgencyId]);
 
   useEffect(() => { fetchCredentials(); }, [fetchCredentials]);
   useEffect(() => { fetchAccounts(); }, [fetchAccounts]);
 
   useEffect(() => {
-    if (agency) {
+    if (activeAgency) {
       setAgencyForm({
-        agency_name: agency.agency_name || '',
-        primary_color: agency.primary_color || '#E12627',
-        secondary_color: agency.secondary_color || '',
-        accent_color: agency.accent_color || '#0083CB',
-        sidebar_bg: agency.sidebar_bg || '',
-        sidebar_text: agency.sidebar_text || '',
-        font_family: agency.font_family || '',
-        logo_url: agency.logo_url || '',
+        agency_name: activeAgency.agency_name || '',
+        primary_color: activeAgency.primary_color || '#E12627',
+        secondary_color: activeAgency.secondary_color || '',
+        accent_color: activeAgency.accent_color || '#0083CB',
+        sidebar_bg: activeAgency.sidebar_bg || '',
+        sidebar_text: activeAgency.sidebar_text || '',
+        font_family: activeAgency.font_family || '',
+        logo_url: activeAgency.logo_url || '',
       });
     }
-  }, [agency]);
+  }, [activeAgency]);
 
   const insertSyncLog = useCallback(async (customerId, chunk) => {
-    if (!agencyId) return;
+    if (!activeAgencyId) return;
     try {
       await supabase.from('sync_log').insert({
-        agency_id: agencyId,
+        agency_id: activeAgencyId,
         customer_id: customerId,
         sync_type: 'chunk',
         date_from: chunk.dateFrom,
@@ -145,7 +155,7 @@ export function SettingsPage() {
     } catch (err) {
       console.warn('[Settings] sync_log insert error:', err);
     }
-  }, [agencyId]);
+  }, [activeAgencyId]);
 
   const handleSyncAccount = async (account) => {
     setSyncingAccount(account.id);
@@ -157,7 +167,7 @@ export function SettingsPage() {
       const { dateFrom, dateTo } = getEffectiveDateRange();
       const result = await syncWithChunking({
         customerId: account.platform_customer_id,
-        agencyId,
+        agencyId: activeAgencyId,
         dateFrom,
         dateTo,
         accessToken: session.access_token,
@@ -235,7 +245,7 @@ export function SettingsPage() {
 
         const result = await syncWithChunking({
           customerId: account.platform_customer_id,
-          agencyId,
+          agencyId: activeAgencyId,
           dateFrom,
           dateTo,
           accessToken: session.access_token,
@@ -292,6 +302,10 @@ export function SettingsPage() {
   };
 
   const handleConnectGoogleAds = async () => {
+    if (!activeAgencyId) {
+      showNotification('Select an agency from the header dropdown first.');
+      return;
+    }
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) { showNotification('Please sign in first.'); return; }
@@ -301,7 +315,7 @@ export function SettingsPage() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ action: 'get_auth_url', platform: 'google_ads', redirect_uri: redirectUri }),
+        body: JSON.stringify({ action: 'get_auth_url', platform: 'google_ads', redirect_uri: redirectUri, agency_id: activeAgencyId }),
       });
       const data = await res.json();
       if (!res.ok || !data.auth_url) throw new Error(data.error || data.message || 'Failed to get auth URL');
@@ -322,7 +336,7 @@ export function SettingsPage() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ action: 'disconnect', platform }),
+        body: JSON.stringify({ action: 'disconnect', platform, agency_id: activeAgencyId }),
       });
       const data = await res.json();
       if (!res.ok && !data.success) throw new Error(data.error || 'Disconnect failed');
@@ -362,7 +376,7 @@ export function SettingsPage() {
   };
 
   const handleSaveAgency = async () => {
-    if (!agency?.id) return;
+    if (!activeAgency?.id) return;
     setSavingAgency(true);
     try {
       const { error } = await supabase.from('agencies').update({
@@ -374,13 +388,32 @@ export function SettingsPage() {
         sidebar_text: agencyForm.sidebar_text || null,
         font_family: agencyForm.font_family || null,
         logo_url: agencyForm.logo_url || null,
-      }).eq('id', agency.id);
+      }).eq('id', activeAgency.id);
       if (error) throw error;
       applyAgencyBranding(agencyForm);
       showNotification('Branding saved');
     } catch (err) {
       showNotification(err.message || 'Failed to save');
     } finally { setSavingAgency(false); }
+  };
+
+  const handleLogoUpload = async (e) => {
+    const file = e?.target?.files?.[0];
+    if (!file || !activeAgencyId) return;
+    setUploadingLogo(true);
+    try {
+      const path = `${activeAgencyId}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+      const { error } = await supabase.storage.from('agency-logos').upload(path, file, { upsert: true });
+      if (error) throw error;
+      const { data: { publicUrl } } = supabase.storage.from('agency-logos').getPublicUrl(path);
+      setAgencyForm((f) => ({ ...f, logo_url: publicUrl }));
+      showNotification('Logo uploaded');
+    } catch (err) {
+      showNotification(err.message || 'Logo upload failed');
+    } finally {
+      setUploadingLogo(false);
+      e.target.value = '';
+    }
   };
 
   const applyAgencyBranding = (form) => {
@@ -395,7 +428,7 @@ export function SettingsPage() {
 
   const handleSignOut = async () => { await signOut(); window.location.href = '/login'; };
 
-  const gadsCred = credentials.find((c) => c.platform === 'google_ads');
+  const gadsCred = credentials.find((c) => c.platform === 'google_ads' && c.is_active);
   const activeGadsAccounts = accounts.filter((a) => a.is_active && a.platform === 'google_ads');
 
   return (
@@ -409,6 +442,9 @@ export function SettingsPage() {
         {/* Platform Connections */}
         <div className="settings-section">
           <h3>Platform Connections</h3>
+          {isSuperAdmin && !activeAgencyId && (
+            <p style={{ color: 'var(--text-muted)', marginBottom: 12 }}>Select an agency from the header dropdown to manage connections.</p>
+          )}
           {loadingCreds ? (
             <p style={{ color: 'var(--text-muted)' }}>Loading</p>
           ) : (
@@ -632,9 +668,9 @@ export function SettingsPage() {
         </div>
 
         {/* Agency Branding */}
-        {isAdmin && agency && (
+        {isAdmin && activeAgency && (
           <div className="settings-section">
-            <h3>Agency Branding</h3>
+            <h3>Agency Branding — {activeAgency?.agency_name || ''}</h3>
             <div className="settings-form-group">
               <label>Agency Name</label>
               <input type="text" value={agencyForm.agency_name}
@@ -665,7 +701,17 @@ export function SettingsPage() {
               <label>Logo URL</label>
               <input type="text" value={agencyForm.logo_url}
                 onChange={(e) => setAgencyForm((f) => ({ ...f, logo_url: e.target.value }))}
-                placeholder="https://..." />
+                placeholder="https://... or paste external URL"
+                style={{ width: '100%', maxWidth: 400 }} />
+              <label className="btn btn-outline btn-sm" style={{ marginTop: 8, cursor: 'pointer', display: 'inline-block' }}>
+                <input type="file" accept="image/*" onChange={handleLogoUpload} disabled={uploadingLogo || !activeAgencyId} style={{ display: 'none' }} />
+                {uploadingLogo ? 'Uploading…' : 'Or upload a logo'}
+              </label>
+              {agencyForm.logo_url && (
+                <div style={{ marginTop: 8 }}>
+                  <img src={agencyForm.logo_url} alt="Logo preview" style={{ maxWidth: 120, maxHeight: 60, objectFit: 'contain', border: '1px solid var(--border)', borderRadius: 4 }} />
+                </div>
+              )}
             </div>
             <button type="button" className="btn btn-primary" onClick={handleSaveAgency} disabled={savingAgency}>
               {savingAgency ? 'Saving…' : 'Save Branding'}

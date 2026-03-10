@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
+const APP_NAME = import.meta.env.VITE_APP_NAME || 'Agency Dashboard';
+
 export function Login() {
   const { signIn } = useAuth();
   const navigate = useNavigate();
@@ -29,8 +31,7 @@ export function Login() {
   return (
     <div className="auth-page">
       <div className="auth-card">
-        <img src="/rc-logo-full.png" alt="Red Castle Services" className="auth-logo" />
-        <h1 className="auth-title">Sign In</h1>
+        <h1 className="auth-title">{APP_NAME}</h1>
         <p className="auth-subtitle">Sign in to your reporting dashboard</p>
         <form className="auth-form" onSubmit={handleSubmit}>
           <div className="auth-form-group">

@@ -41,6 +41,9 @@ export function AuthProvider({ children }) {
   const [userEmail, setUserEmail] = useState('');
   const [agencyId, setAgencyId] = useState(null);
   const [agency, setAgency] = useState(null);
+  const [activeAgencyId, setActiveAgencyIdState] = useState(null);
+  const [activeAgency, setActiveAgency] = useState(null);
+  const [allAgencies, setAllAgencies] = useState([]);
   const [permissions, setPermissions] = useState(new Set());
   const [allowedClients, setAllowedClients] = useState([]);
   const [allowedPlatformAccounts, setAllowedPlatformAccounts] = useState({});
@@ -48,6 +51,7 @@ export function AuthProvider({ children }) {
   const [canViewAllCustomers, setCanViewAllCustomers] = useState(false);
   const [profileLoaded, setProfileLoaded] = useState(false);
   const lastProfileLoad = useRef({ userId: null, at: 0 });
+  const activeAgencyIdRef = useRef(null);
   const PROFILE_LOAD_DEBOUNCE_MS = 2000;
 
   const prevAllowedClientAccounts = useRef('');
@@ -99,9 +103,13 @@ export function AuthProvider({ children }) {
   }, [canViewAllCustomers, allowedPlatformAccounts]);
 
   const loadUserProfile = useCallback(async (userId, authUser = null) => {
-    if (!userId) return;
+    if (!userId) {
+      setProfileLoaded(true);
+      return;
+    }
     const now = Date.now();
     if (lastProfileLoad.current.userId === userId && now - lastProfileLoad.current.at < PROFILE_LOAD_DEBOUNCE_MS) {
+      setProfileLoaded(true);
       return;
     }
     lastProfileLoad.current = { userId, at: now };
@@ -119,6 +127,8 @@ export function AuthProvider({ children }) {
           setUserRole('');
           setAgencyId(null);
           setAgency(null);
+          setActiveAgencyIdState(null);
+          setActiveAgency(null);
           setPermissionsStable(new Set(['sidebar.settings', 'tab.combined_dashboard', 'sidebar.google_ads']));
           setAllowedClientsStable([]);
           setAllowedPlatformAccountsStable({});
@@ -140,7 +150,10 @@ export function AuthProvider({ children }) {
       setUserName(profile.full_name || '');
       setUserEmail(profile.email || '');
       setAgencyId(profile.agency_id);
-      setAgency(profile.agencies || null);
+      const agencyData = profile.agencies || null;
+      setAgency(agencyData);
+      setActiveAgencyIdState((prev) => (isSuperAdmin && prev != null ? prev : profile.agency_id));
+      setActiveAgency((prevA) => (isSuperAdmin && prevA != null ? prevA : agencyData));
 
       const viewAll = isSuperAdmin || ['super_admin', 'admin', 'manager'].includes(roleName?.toLowerCase());
       setCanViewAllCustomers(viewAll);
@@ -158,9 +171,8 @@ export function AuthProvider({ children }) {
       setAuthError(null);
 
       let cpaQuery = supabase.from('client_platform_accounts').select('id,platform_customer_id,account_name,platform,agency_id').eq('is_active', true);
-      if (profile.agency_id && !profile.is_super_admin) {
-        cpaQuery = cpaQuery.eq('agency_id', profile.agency_id);
-      }
+      const filterAgencyId = (isSuperAdmin && activeAgencyIdRef.current) ? activeAgencyIdRef.current : (profile.agency_id || '00000000-0000-0000-0000-000000000000');
+      cpaQuery = cpaQuery.eq('agency_id', filterAgencyId);
       const { data: cpaData, error: cpaErr } = await withTimeout(cpaQuery, SUPABASE_TIMEOUT_MS);
       if (cpaErr) console.warn('[Auth] client_platform_accounts error:', cpaErr);
 
@@ -191,8 +203,18 @@ export function AuthProvider({ children }) {
       setAllowedClientAccountsStable(clientAccounts);
       setProfileLoaded(true);
 
-      if (profile.agencies) {
-        const a = profile.agencies;
+      if (isSuperAdmin) {
+        const { data: agenciesData } = await withTimeout(
+          supabase.from('agencies').select('*').order('agency_name'),
+          SUPABASE_TIMEOUT_MS
+        );
+        setAllAgencies(agenciesData || []);
+      } else {
+        setAllAgencies([]);
+      }
+
+      if (agencyData) {
+        const a = agencyData;
         const root = typeof document !== 'undefined' ? document.documentElement : null;
         if (root) {
           if (a.primary_color) root.style.setProperty('--primary-color', a.primary_color);
@@ -211,6 +233,132 @@ export function AuthProvider({ children }) {
       setProfileLoaded(true);
     }
   }, []);
+
+  const setActiveAgencyId = useCallback(async (newAgencyId) => {
+    const isSuperAdmin = userProfile?.is_super_admin || userRole?.toLowerCase() === 'super_admin';
+    if (!isSuperAdmin) return;
+    if (!newAgencyId) {
+      setActiveAgencyIdState(null);
+      setActiveAgency(null);
+      setAllowedClientsStable([]);
+      setAllowedPlatformAccountsStable({});
+      setAllowedClientAccountsStable([]);
+      const root = typeof document !== 'undefined' ? document.documentElement : null;
+      const a = agency;
+      if (root && a) {
+        if (a.primary_color) root.style.setProperty('--primary-color', a.primary_color);
+        if (a.secondary_color) root.style.setProperty('--secondary-color', a.secondary_color);
+        if (a.accent_color) root.style.setProperty('--accent-color', a.accent_color);
+        if (a.sidebar_bg) root.style.setProperty('--sidebar-bg', a.sidebar_bg);
+        if (a.sidebar_text) root.style.setProperty('--sidebar-text', a.sidebar_text);
+        if (a.font_family) root.style.setProperty('--font-family', a.font_family);
+        if (a.primary_color) root.style.setProperty('--primary', a.primary_color);
+        if (a.accent_color) root.style.setProperty('--accent', a.accent_color);
+      }
+      return;
+    }
+    setActiveAgencyIdState(newAgencyId);
+    try {
+      const { data: agencyRow, error: agencyErr } = await withTimeout(
+        supabase.from('agencies').select('*').eq('id', newAgencyId).single(),
+        SUPABASE_TIMEOUT_MS
+      );
+      if (agencyErr || !agencyRow) {
+        console.warn('[Auth] setActiveAgencyId agency fetch:', agencyErr);
+        return;
+      }
+      setActiveAgency(agencyRow);
+      setAllowedClientsStable([]);
+      setAllowedPlatformAccountsStable({});
+      setAllowedClientAccountsStable([]);
+
+      const { data: cpaData, error: cpaErr } = await withTimeout(
+        supabase.from('client_platform_accounts').select('id,platform_customer_id,account_name,platform,agency_id').eq('agency_id', newAgencyId).eq('is_active', true),
+        SUPABASE_TIMEOUT_MS
+      );
+      if (cpaErr) console.warn('[Auth] setActiveAgencyId cpa fetch:', cpaErr);
+
+      const clients = [];
+      const platformMap = {};
+      const clientAccounts = [];
+      (cpaData || []).forEach((r) => {
+        const platform = r.platform || 'google_ads';
+        if (!platformMap[platform]) platformMap[platform] = [];
+        if (r.platform_customer_id && !platformMap[platform].includes(String(r.platform_customer_id))) {
+          platformMap[platform].push(String(r.platform_customer_id));
+        }
+        const accName = r.account_name || r.platform_customer_id;
+        clients.push({ client_id: r.id, client_name: accName, platform_customer_id: String(r.platform_customer_id) });
+        if (platform === 'google_ads') {
+          clientAccounts.push({
+            client_id: r.id,
+            client_name: accName,
+            platform: 'google_ads',
+            platform_customer_id: String(r.platform_customer_id),
+            account_name: r.account_name,
+          });
+        }
+      });
+
+      setAllowedClientsStable(clients);
+      setAllowedPlatformAccountsStable(platformMap);
+      setAllowedClientAccountsStable(clientAccounts);
+
+      const root = typeof document !== 'undefined' ? document.documentElement : null;
+      if (root && agencyRow) {
+        if (agencyRow.primary_color) root.style.setProperty('--primary-color', agencyRow.primary_color);
+        if (agencyRow.secondary_color) root.style.setProperty('--secondary-color', agencyRow.secondary_color);
+        if (agencyRow.accent_color) root.style.setProperty('--accent-color', agencyRow.accent_color);
+        if (agencyRow.sidebar_bg) root.style.setProperty('--sidebar-bg', agencyRow.sidebar_bg);
+        if (agencyRow.sidebar_text) root.style.setProperty('--sidebar-text', agencyRow.sidebar_text);
+        if (agencyRow.font_family) root.style.setProperty('--font-family', agencyRow.font_family);
+        if (agencyRow.primary_color) root.style.setProperty('--primary', agencyRow.primary_color);
+        if (agencyRow.accent_color) root.style.setProperty('--accent', agencyRow.accent_color);
+      }
+    } catch (err) {
+      console.warn('[Auth] setActiveAgencyId error:', err);
+    }
+  }, [userProfile?.is_super_admin, userRole, agency]);
+
+  useEffect(() => { activeAgencyIdRef.current = activeAgencyId; }, [activeAgencyId]);
+
+  const refreshAllAgencies = useCallback(async () => {
+    const isSuperAdmin = userProfile?.is_super_admin || userRole?.toLowerCase() === 'super_admin';
+    if (!isSuperAdmin) return;
+    try {
+      const { data } = await withTimeout(
+        supabase.from('agencies').select('*').order('agency_name'),
+        SUPABASE_TIMEOUT_MS
+      );
+      setAllAgencies(data || []);
+    } catch (err) {
+      console.warn('[Auth] refreshAllAgencies error:', err);
+    }
+  }, [userProfile?.is_super_admin, userRole]);
+
+  const agencyFromSelection = activeAgencyId && allAgencies.length > 0 ? allAgencies.find((a) => a.id === activeAgencyId) : null;
+  const displayAgencyForBranding = activeAgency ?? agencyFromSelection ?? (userProfile?.is_super_admin || userRole?.toLowerCase() === 'super_admin' ? agency : null);
+  const BRAND_DEFAULTS = { primary: '#E12627', accent: '#0083CB' };
+  useEffect(() => {
+    const a = displayAgencyForBranding;
+    const root = typeof document !== 'undefined' ? document.documentElement : null;
+    if (root && a) {
+      const primary = a.primary_color || BRAND_DEFAULTS.primary;
+      const accent = a.accent_color || BRAND_DEFAULTS.accent;
+      root.style.setProperty('--primary-color', primary);
+      root.style.setProperty('--primary', primary);
+      root.style.setProperty('--accent-color', accent);
+      root.style.setProperty('--accent', accent);
+      if (a.secondary_color) root.style.setProperty('--secondary-color', a.secondary_color);
+      else root.style.removeProperty('--secondary-color');
+      if (a.sidebar_bg) root.style.setProperty('--sidebar-bg', a.sidebar_bg);
+      else root.style.removeProperty('--sidebar-bg');
+      if (a.sidebar_text) root.style.setProperty('--sidebar-text', a.sidebar_text);
+      else root.style.removeProperty('--sidebar-text');
+      if (a.font_family) root.style.setProperty('--font-family', a.font_family);
+      else root.style.removeProperty('--font-family');
+    }
+  }, [displayAgencyForBranding]);
 
   useEffect(() => {
     if (AUTH_DISABLED) {
@@ -262,6 +410,9 @@ export function AuthProvider({ children }) {
         setUserProfile(null);
         setAgency(null);
         setAgencyId(null);
+        setActiveAgencyIdState(null);
+        setActiveAgency(null);
+        setAllAgencies([]);
         setProfileLoaded(false);
         setUserRole('');
         setUserName('');
@@ -285,6 +436,8 @@ export function AuthProvider({ children }) {
     if (session && user && profileLoaded && !authError) {
       setLoading(false);
     } else if (!session || authError) {
+      setLoading(false);
+    } else if (session && !user) {
       setLoading(false);
     }
   }, [session, user, profileLoaded, authError]);
@@ -338,6 +491,9 @@ export function AuthProvider({ children }) {
     setUserProfile(null);
     setAgency(null);
     setAgencyId(null);
+    setActiveAgencyIdState(null);
+    setActiveAgency(null);
+    setAllAgencies([]);
     setUserRole('');
     setUserName('');
     setUserEmail('');
@@ -354,6 +510,10 @@ export function AuthProvider({ children }) {
     setAuthError(null);
   }, []);
 
+  const isImpersonating = activeAgencyId !== null && agencyId !== null && activeAgencyId !== agencyId;
+  const isSuperAdmin = userProfile?.is_super_admin || userRole?.toLowerCase() === 'super_admin';
+  const displayAgency = activeAgency ?? agencyFromSelection ?? (isSuperAdmin ? agency : null);
+
   const value = useMemo(() => ({
     user,
     session,
@@ -366,6 +526,13 @@ export function AuthProvider({ children }) {
     userEmail,
     agencyId,
     agency,
+    activeAgencyId,
+    activeAgency,
+    displayAgency,
+    setActiveAgencyId,
+    refreshAllAgencies,
+    isImpersonating,
+    allAgencies,
     permissions,
     allowedClients,
     allowedPlatformAccounts,
@@ -388,6 +555,13 @@ export function AuthProvider({ children }) {
     userEmail,
     agencyId,
     agency,
+    activeAgencyId,
+    activeAgency,
+    displayAgency,
+    setActiveAgencyId,
+    refreshAllAgencies,
+    isImpersonating,
+    allAgencies,
     permissions,
     allowedClients,
     allowedPlatformAccounts,

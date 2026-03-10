@@ -66,7 +66,7 @@ function addMetrics(o) {
 }
 
 export function useGoogleAdsData() {
-  const { canViewAllCustomers, allowedClientAccounts } = useAuth();
+  const { canViewAllCustomers, allowedClientAccounts, activeAgencyId } = useAuth();
 
   const allowedClientAccountsRef = useRef(allowedClientAccounts);
   allowedClientAccountsRef.current = allowedClientAccounts;
@@ -122,8 +122,9 @@ export function useGoogleAdsData() {
       const { from, to } = computeDateRange(f.datePreset, f.dateFrom, f.dateTo);
       let cid = f.customerId;
 
+      const useAgencyScoped = activeAgencyId || !canViewAllCustomers;
       if (!optionsLoaded.current) {
-        if (canViewAllCustomers) {
+        if (canViewAllCustomers && !useAgencyScoped) {
           const { data: cpaData, error: cpaErr } = await supabase
             .from('client_platform_accounts')
             .select('id,platform_customer_id,account_name')
@@ -198,7 +199,7 @@ export function useGoogleAdsData() {
 
       const resolveCustomerFilter = () => {
         if (cid === 'ALL') {
-          if (!canViewAllCustomers) {
+          if (!canViewAllCustomers || useAgencyScoped) {
             const ids = (allowedClientAccountsRef.current || []).filter((a) => a.platform === 'google_ads').map((a) => a.platform_customer_id);
             return ids.length ? { customerIds: ids } : { customerIds: [NO_MATCH_ID] };
           }
@@ -307,9 +308,14 @@ export function useGoogleAdsData() {
       fetchInProgressRef.current = false;
       setLoading(false);
     }
-  }, [canViewAllCustomers]);
+  }, [canViewAllCustomers, allowedClientAccounts, activeAgencyId]);
 
-  useEffect(() => { optionsLoaded.current = false; }, [canViewAllCustomers]);
+  useEffect(() => {
+    optionsLoaded.current = false;
+    fetchInProgressRef.current = false;
+    setClientOptions([]);
+    setFilters((prev) => ({ ...prev, customerId: 'ALL' }));
+  }, [canViewAllCustomers, activeAgencyId, allowedClientAccounts]);
   useEffect(() => { fetchData(); }, [fetchData]);
 
   /* ── KPIs ── */

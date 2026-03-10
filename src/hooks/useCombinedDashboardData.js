@@ -49,7 +49,7 @@ function computeDateRange(preset, customFrom, customTo) {
 function num(v) { return Number(v) || 0; }
 
 export function useCombinedDashboardData() {
-  const { canViewAllCustomers, allowedClientAccounts } = useAuth();
+  const { canViewAllCustomers, allowedClientAccounts, activeAgencyId } = useAuth();
   const { selectedClientId } = useApp();
 
   const [filters, setFilters] = useState({
@@ -82,7 +82,8 @@ export function useCombinedDashboardData() {
       let customerIds = [];
       let accountList = [];
 
-      if (canViewAllCustomers) {
+      const useAgencyScoped = activeAgencyId || !canViewAllCustomers;
+      if (canViewAllCustomers && !useAgencyScoped) {
         const { data: cpaData } = await supabase
           .from('client_platform_accounts')
           .select('id,platform_customer_id,account_name')
@@ -151,8 +152,14 @@ export function useCombinedDashboardData() {
     } finally {
       setLoading(false);
     }
-  }, [canViewAllCustomers, allowedClientAccounts, selectedClientId, filters.datePreset, filters.dateFrom, filters.dateTo]);
+  }, [canViewAllCustomers, allowedClientAccounts, activeAgencyId, selectedClientId, filters.datePreset, filters.dateFrom, filters.dateTo]);
 
+  useEffect(() => {
+    setRawCampaigns([]);
+    setRawAdGroups([]);
+    setRawKeywords([]);
+    setAccountMap(new Map());
+  }, [activeAgencyId, allowedClientAccounts]);
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const summaryKpis = useMemo(() => {

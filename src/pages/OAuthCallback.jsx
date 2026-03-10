@@ -8,16 +8,28 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 export function OAuthCallback() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { session, agencyId, signOut } = useAuth();
+  const { session, activeAgencyId, signOut } = useAuth();
 
   const code = searchParams.get('code');
-  const state = searchParams.get('state');
+  const stateParam = searchParams.get('state');
   const errorParam = searchParams.get('error');
+
+  const stateAgencyId = (() => {
+    if (!stateParam) return null;
+    try {
+      const parsed = JSON.parse(stateParam);
+      return parsed?.agency_id || null;
+    } catch {
+      return null;
+    }
+  })();
+  const effectiveAgencyId = stateAgencyId || activeAgencyId;
 
   const [step, setStep] = useState('loading');
   const [mccId, setMccId] = useState('');
   const [customers, setCustomers] = useState([]);
   const [selectedIds, setSelectedIds] = useState(new Set());
+  const [accountSearch, setAccountSearch] = useState('');
   const [credentialId, setCredentialId] = useState(null);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -39,13 +51,13 @@ export function OAuthCallback() {
       setStep('auth');
       return;
     }
-    if (!agencyId) {
+    if (!effectiveAgencyId) {
       setError('No agency assigned. Contact admin.');
       setStep('error');
       return;
     }
     setStep('mcc');
-  }, [code, errorParam, session, agencyId]);
+  }, [code, errorParam, session, effectiveAgencyId]);
 
   const handleExchangeCode = async (e) => {
     e.preventDefault();
@@ -68,6 +80,7 @@ export function OAuthCallback() {
           redirect_uri: redirectUri,
           platform: 'google_ads',
           mcc_id: mccId.trim(),
+          agency_id: effectiveAgencyId,
         }),
       });
       const data = await res.json();
@@ -86,7 +99,7 @@ export function OAuthCallback() {
   };
 
   useEffect(() => {
-    if (step !== 'list' || !agencyId || !session) return;
+    if (step !== 'list' || !effectiveAgencyId || !session) return;
     const fetchAccounts = async () => {
       setSubmitting(true);
       setError('');
@@ -97,7 +110,7 @@ export function OAuthCallback() {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${session.access_token}`,
           },
-          body: JSON.stringify({ list_only: true, agency_id: agencyId }),
+          body: JSON.stringify({ list_only: true, agency_id: effectiveAgencyId }),
         });
         const data = await res.json();
         if (!res.ok) {
@@ -115,7 +128,7 @@ export function OAuthCallback() {
       }
     };
     fetchAccounts();
-  }, [step, agencyId, session]);
+  }, [step, effectiveAgencyId, session]);
 
   const toggleAccount = (id) => {
     setSelectedIds((prev) => {
@@ -125,6 +138,24 @@ export function OAuthCallback() {
       return next;
     });
   };
+
+  const selectAll = () => {
+    const toSelect = accountSearch.trim() ? filteredCustomers : customers;
+    setSelectedIds(new Set(toSelect.map((c) => String(c.customer_id || c.id || c))));
+  };
+
+  const unselectAll = () => {
+    setSelectedIds(new Set());
+  };
+
+  const filteredCustomers = accountSearch.trim()
+    ? customers.filter((c) => {
+        const cid = String(c.customer_id || c.id || c);
+        const name = (c.descriptive_name || c.account_name || c.name || cid).toLowerCase();
+        const search = accountSearch.trim().toLowerCase();
+        return name.includes(search) || cid.includes(search);
+      })
+    : customers;
 
   const handleSaveAccounts = async () => {
     if (selectedIds.size === 0) {
@@ -137,7 +168,7 @@ export function OAuthCallback() {
       const { data: creds } = await supabase
         .from('agency_platform_credentials')
         .select('id')
-        .eq('agency_id', agencyId)
+        .eq('agency_id', effectiveAgencyId)
         .eq('platform', 'google_ads')
         .eq('is_active', true)
         .limit(1)
@@ -153,7 +184,7 @@ export function OAuthCallback() {
         if (!selectedIds.has(cid)) return;
         const name = c.descriptive_name || c.account_name || c.name || cid;
         toInsert.push({
-          agency_id: agencyId,
+          agency_id: effectiveAgencyId,
           credential_id: credId,
           platform: 'google_ads',
           platform_customer_id: cid,
@@ -164,20 +195,6 @@ export function OAuthCallback() {
 
       const { error: insertErr } = await supabase.from('client_platform_accounts').insert(toInsert);
       if (insertErr) throw insertErr;
-
-      const today = new Date();
-      const backfillItems = [];
-      for (let d = 0; d < 90; d++) {
-        const date = new Date(today);
-        date.setDate(date.getDate() - d);
-        const fillDate = date.toISOString().slice(0, 10);
-        toInsert.forEach((acc) => {
-          backfillItems.push({ customer_id: acc.platform_customer_id, fill_date: fillDate, func: 'full-sync' });
-          backfillItems.push({ customer_id: acc.platform_customer_id, fill_date: fillDate, func: 'geo' });
-        });
-      }
-      const { error: backfillErr } = await supabase.from('gads_backfill_queue').insert(backfillItems);
-      if (backfillErr) console.warn('[OAuth] Backfill queue insert:', backfillErr.message);
 
       navigate('/');
       window.location.reload();
@@ -254,11 +271,37 @@ export function OAuthCallback() {
             <div className="auth-loading-spinner" style={{ margin: '24px auto' }} />
           ) : (
             <>
+              {customers.length > 0 && (
+                <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <input
+                    type="text"
+                    placeholder="Search accounts by name or ID..."
+                    value={accountSearch}
+                    onChange={(e) => setAccountSearch(e.target.value)}
+                    style={{
+                      flex: 1,
+                      minWidth: 180,
+                      padding: '8px 12px',
+                      border: '1px solid var(--border)',
+                      borderRadius: 'var(--radius-sm)',
+                      fontSize: 14,
+                    }}
+                  />
+                  <button type="button" className="btn btn-outline btn-sm" onClick={selectAll}>
+                    Select all
+                  </button>
+                  <button type="button" className="btn btn-outline btn-sm" onClick={unselectAll}>
+                    Unselect all
+                  </button>
+                </div>
+              )}
               <div style={{ maxHeight: 320, overflowY: 'auto', marginBottom: 16, border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: 12 }}>
                 {customers.length === 0 ? (
                   <p style={{ color: 'var(--text-muted)' }}>No accounts found under this MCC.</p>
+                ) : filteredCustomers.length === 0 ? (
+                  <p style={{ color: 'var(--text-muted)' }}>No accounts match your search.</p>
                 ) : (
-                  customers.map((c) => {
+                  filteredCustomers.map((c) => {
                     const cid = String(c.customer_id || c.id || c);
                     const name = c.descriptive_name || c.account_name || c.name || cid;
                     return (
@@ -283,7 +326,7 @@ export function OAuthCallback() {
                   onClick={handleSaveAccounts}
                   disabled={submitting || selectedIds.size === 0}
                 >
-                  {submitting ? 'Saving…' : 'Save Selected Accounts'}
+                  {submitting ? 'Saving…' : `Save Selected Accounts${selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}`}
                 </button>
                 <button type="button" className="btn btn-outline" onClick={() => navigate('/')}>
                   Skip

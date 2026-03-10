@@ -89,7 +89,8 @@ export const Sidebar = React.memo(function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const { currentPage, showPage, sidebarOpen, sidebarCollapsed } = useApp();
-  const { hasPermission, agency } = useAuth();
+  const { hasPermission, displayAgency, activeAgencyId, activeAgency, setActiveAgencyId, isImpersonating, allAgencies, userProfile, userRole } = useAuth();
+  const isSuperAdmin = userProfile?.is_super_admin || userRole?.toLowerCase() === 'super_admin';
   const isAdmin = location.pathname === '/admin';
 
   const sidebarClass = ['sidebar', sidebarOpen && 'open', sidebarCollapsed && 'collapsed'].filter(Boolean).join(' ');
@@ -98,13 +99,35 @@ export const Sidebar = React.memo(function Sidebar() {
     <aside className={sidebarClass} id="sidebar">
       <div className="sidebar-brand">
         <div className="brand-logo-text" id="brandLogo">
-          {agency?.logo_url ? (
-            <img src={agency.logo_url} alt={agency.agency_name || 'Agency'} className="brand-logo-img" />
+          {displayAgency?.logo_url ? (
+            <img src={displayAgency.logo_url} alt={displayAgency.agency_name || 'Agency'} className="brand-logo-img" />
           ) : (
-            <img src="/rc-logo.png" alt="Red Castle Services" className="brand-logo-img" />
+            <span className="brand-logo-text">{displayAgency?.agency_name || 'Agency'}</span>
           )}
         </div>
       </div>
+
+      {isSuperAdmin && allAgencies.length > 0 && !sidebarCollapsed && (
+        <div className="sidebar-agency-selector" style={{ padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+          <select
+            className="client-selector"
+            value={activeAgencyId ?? ''}
+            onChange={(e) => setActiveAgencyId(e.target.value || null)}
+            title="Select agency"
+            style={{ width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.2)', background: 'rgba(0,0,0,0.2)', color: '#fff', fontSize: 13 }}
+          >
+            <option value="">All accounts</option>
+            {allAgencies.map((a) => (
+              <option key={a.id} value={a.id}>{a.agency_name || a.id}</option>
+            ))}
+          </select>
+          {isImpersonating && (
+            <span style={{ display: 'block', marginTop: 6, fontSize: 11, color: 'var(--accent)', fontWeight: 600 }}>
+              (viewing as {activeAgency?.agency_name || 'agency'})
+            </span>
+          )}
+        </div>
+      )}
 
       {Array.from(sections.entries()).map(([sectionLabel, items]) => (
         <div key={sectionLabel} className="sidebar-section">

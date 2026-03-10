@@ -33,7 +33,7 @@ const AppContext = createContext(null);
 
 export function AppProvider({ children }) {
   migrateBrand();
-  const { allowedClientAccounts } = useAuth();
+  const { allowedClientAccounts, activeAgencyId, displayAgency } = useAuth();
 
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -45,17 +45,10 @@ export function AppProvider({ children }) {
     agencyLogo: localStorage.getItem(STORAGE_KEYS.agencyLogo) || DEFAULTS.agencyLogo,
   }));
   const [colors, setColors] = useState(() => {
-    const root = typeof document !== 'undefined' ? document.documentElement : null;
     const primary = localStorage.getItem(STORAGE_KEYS.primaryColor) || DEFAULTS.primary;
     const accent = localStorage.getItem(STORAGE_KEYS.accentColor) || DEFAULTS.accent;
     const warning = localStorage.getItem(STORAGE_KEYS.warningColor) || DEFAULTS.warning;
     const danger = localStorage.getItem(STORAGE_KEYS.dangerColor) || DEFAULTS.danger;
-    if (root) {
-      root.style.setProperty('--primary', primary);
-      root.style.setProperty('--accent', accent);
-      root.style.setProperty('--warning', warning);
-      root.style.setProperty('--danger', danger);
-    }
     return { primary, accent, warning, danger };
   });
 
@@ -144,6 +137,24 @@ export function AppProvider({ children }) {
     if (name) setBranding((b) => ({ ...b, agencyName: name }));
     if (logo) setBranding((b) => ({ ...b, agencyLogo: logo }));
   }, []);
+
+  useEffect(() => {
+    setCurrentClient(null);
+  }, [activeAgencyId]);
+
+  useEffect(() => {
+    const root = typeof document !== 'undefined' ? document.documentElement : null;
+    if (!root) return;
+    if (displayAgency) return;
+    const primary = localStorage.getItem(STORAGE_KEYS.primaryColor) || DEFAULTS.primary;
+    const accent = localStorage.getItem(STORAGE_KEYS.accentColor) || DEFAULTS.accent;
+    const warning = localStorage.getItem(STORAGE_KEYS.warningColor) || DEFAULTS.warning;
+    const danger = localStorage.getItem(STORAGE_KEYS.dangerColor) || DEFAULTS.danger;
+    root.style.setProperty('--primary', primary);
+    root.style.setProperty('--accent', accent);
+    root.style.setProperty('--warning', warning);
+    root.style.setProperty('--danger', danger);
+  }, [displayAgency]);
 
   const clients = useMemo(() => [
     { id: null, name: 'Select Client...' },

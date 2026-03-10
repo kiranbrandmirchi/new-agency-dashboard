@@ -1,5 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { AuthProvider } from './context/AuthContext';
 import { AppProvider } from './context/AppContext';
 import App from './App';
@@ -21,10 +22,12 @@ document.head.appendChild(style);
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <AuthProvider>
-      <AppProvider>
-        <App />
-      </AppProvider>
-    </AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <AppProvider>
+          <App />
+        </AppProvider>
+      </AuthProvider>
+    </ErrorBoundary>
   </React.StrictMode>
 );

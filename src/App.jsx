@@ -116,6 +116,11 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="/" element={
+          <ProtectedRoute>
+            <DashboardLayout />
+          </ProtectedRoute>
+        } />
         <Route path="/login" element={
           <LoginRedirect>
             <Login />
@@ -127,11 +132,6 @@ export default function App() {
           </LoginRedirect>
         } />
         <Route path="/oauth/callback" element={<OAuthCallback />} />
-        <Route path="/" element={
-          <ProtectedRoute>
-            <DashboardLayout />
-          </ProtectedRoute>
-        } />
         <Route path="/dashboard" element={<Navigate to="/" replace />} />
         <Route path="/admin" element={
           <ProtectedRoute>

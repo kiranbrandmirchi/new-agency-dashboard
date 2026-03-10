@@ -39,7 +39,7 @@ const DEFAULT_PERMISSIONS = [
 ];
 
 export function Admin() {
-  const { agencyId, userProfile, userRole } = useAuth();
+  const { user, agencyId, activeAgencyId, userProfile, userRole } = useAuth();
   const isSuperAdmin = userProfile?.is_super_admin || userRole?.toLowerCase() === 'super_admin';
   const [activeTab, setActiveTab] = useState('users');
   const [loading, setLoading] = useState(true);
@@ -89,22 +89,25 @@ export function Admin() {
         )}
 
         {activeTab === 'agencies' && isSuperAdmin && <AdminAgenciesTab onMessage={showMessage} setLoading={setLoading} />}
-        {activeTab === 'users' && <AdminUsersTab onMessage={showMessage} setLoading={setLoading} agencyId={agencyId} isSuperAdmin={isSuperAdmin} />}
+        {activeTab === 'users' && <AdminUsersTab onMessage={showMessage} setLoading={setLoading} agencyId={activeAgencyId} isSuperAdmin={isSuperAdmin} currentUserId={user?.id} />}
         {activeTab === 'roles' && <AdminRolesTab onMessage={showMessage} setLoading={setLoading} />}
-        {activeTab === 'clients' && <AdminClientsTab onMessage={showMessage} setLoading={setLoading} agencyId={agencyId} />}
+        {activeTab === 'clients' && <AdminClientsTab onMessage={showMessage} setLoading={setLoading} agencyId={activeAgencyId} isSuperAdmin={isSuperAdmin} />}
         {activeTab === 'permissions' && <AdminPermissionsTab onMessage={showMessage} setLoading={setLoading} />}
-        {activeTab === 'report_tabs' && <AdminReportTabsTab onMessage={showMessage} setLoading={setLoading} agencyId={agencyId} />}
+        {activeTab === 'report_tabs' && <AdminReportTabsTab onMessage={showMessage} setLoading={setLoading} agencyId={activeAgencyId} />}
       </div>
     </div>
   );
 }
 
 function AdminAgenciesTab({ onMessage, setLoading }) {
+  const { activeAgency, refreshAllAgencies } = useAuth();
   const [agencies, setAgencies] = useState([]);
   const [editingAgency, setEditingAgency] = useState(null);
   const [formData, setFormData] = useState({ agency_name: '', primary_color: '#E12627', secondary_color: '', accent_color: '#0083CB', sidebar_bg: '', sidebar_text: '', font_family: '', logo_url: '' });
   const [usersByAgency, setUsersByAgency] = useState({});
   const [credsByAgency, setCredsByAgency] = useState({});
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [previewActive, setPreviewActive] = useState(false);
 
   const loadAgencies = useCallback(async () => {
     setLoading(true);
@@ -120,6 +123,7 @@ function AdminAgenciesTab({ onMessage, setLoading }) {
   }, [onMessage, setLoading]);
 
   const loadAgencyDetails = useCallback(async (agencyId) => {
+    if (!agencyId || typeof agencyId !== 'string') return;
     const [usersRes, credsRes] = await Promise.all([
       supabase.from('user_profiles').select('id, full_name, email').eq('agency_id', agencyId),
       supabase.from('agency_platform_credentials').select('id, platform, is_active').eq('agency_id', agencyId),
@@ -130,10 +134,19 @@ function AdminAgenciesTab({ onMessage, setLoading }) {
 
   useEffect(() => { loadAgencies(); }, [loadAgencies]);
 
+  const slugify = (name) => {
+    const base = (name || '')
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, '-')
+      .replace(/[^a-z0-9-]/g, '');
+    return base || `agency-${Date.now()}`;
+  };
+
   const saveAgency = async () => {
     if (!formData.agency_name?.trim()) return;
     try {
-      if (editingAgency) {
+      if (editingAgency?.id) {
         const { error } = await supabase.from('agencies').update({
           agency_name: formData.agency_name.trim(),
           primary_color: formData.primary_color || null,
@@ -146,9 +159,13 @@ function AdminAgenciesTab({ onMessage, setLoading }) {
         }).eq('id', editingAgency.id);
         if (error) throw error;
         onMessage('Agency updated');
+        refreshAllAgencies?.();
       } else {
+        const baseSlug = slugify(formData.agency_name);
+        const agencySlug = `${baseSlug}-${Math.random().toString(36).slice(2, 8)}`;
         const { error } = await supabase.from('agencies').insert({
           agency_name: formData.agency_name.trim(),
+          agency_slug: agencySlug,
           primary_color: formData.primary_color || null,
           secondary_color: formData.secondary_color || null,
           accent_color: formData.accent_color || null,
@@ -163,6 +180,7 @@ function AdminAgenciesTab({ onMessage, setLoading }) {
       setEditingAgency(null);
       setFormData({ agency_name: '', primary_color: '#E12627', secondary_color: '', accent_color: '#0083CB', sidebar_bg: '', sidebar_text: '', font_family: '', logo_url: '' });
       loadAgencies();
+      refreshAllAgencies?.();
     } catch (err) {
       onMessage(err?.message || 'Failed to save', true);
     }
@@ -180,7 +198,55 @@ function AdminAgenciesTab({ onMessage, setLoading }) {
       font_family: a.font_family || '',
       logo_url: a.logo_url || '',
     });
+    setPreviewActive(false);
     loadAgencyDetails(a.id);
+  };
+
+  const applyPreview = () => {
+    const root = document.documentElement;
+    if (formData.primary_color) { root.style.setProperty('--primary-color', formData.primary_color); root.style.setProperty('--primary', formData.primary_color); }
+    if (formData.secondary_color) root.style.setProperty('--secondary-color', formData.secondary_color);
+    if (formData.accent_color) { root.style.setProperty('--accent-color', formData.accent_color); root.style.setProperty('--accent', formData.accent_color); }
+    if (formData.sidebar_bg) root.style.setProperty('--sidebar-bg', formData.sidebar_bg);
+    if (formData.sidebar_text) root.style.setProperty('--sidebar-text', formData.sidebar_text);
+    if (formData.font_family) root.style.setProperty('--font-family', formData.font_family);
+    setPreviewActive(true);
+  };
+
+  const resetPreview = () => {
+    const a = activeAgency;
+    const root = document.documentElement;
+    const defaults = { primary_color: '#E12627', accent_color: '#0083CB', secondary_color: '#666', sidebar_bg: '#1a1a2e', sidebar_text: '#fff', font_family: 'Inter, sans-serif' };
+    const src = a || defaults;
+    root.style.setProperty('--primary-color', src.primary_color || defaults.primary_color);
+    root.style.setProperty('--primary', src.primary_color || defaults.primary_color);
+    root.style.setProperty('--secondary-color', src.secondary_color || defaults.secondary_color);
+    root.style.setProperty('--accent-color', src.accent_color || defaults.accent_color);
+    root.style.setProperty('--accent', src.accent_color || defaults.accent_color);
+    root.style.setProperty('--sidebar-bg', src.sidebar_bg || defaults.sidebar_bg);
+    root.style.setProperty('--sidebar-text', src.sidebar_text || defaults.sidebar_text);
+    root.style.setProperty('--font-family', src.font_family || defaults.font_family);
+    setPreviewActive(false);
+  };
+
+  const handleLogoUpload = async (e) => {
+    const file = e?.target?.files?.[0];
+    const agencyId = editingAgency?.id;
+    if (!file || !agencyId) return;
+    setUploadingLogo(true);
+    try {
+      const path = `${agencyId}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+      const { error } = await supabase.storage.from('agency-logos').upload(path, file, { upsert: true });
+      if (error) throw error;
+      const { data: { publicUrl } } = supabase.storage.from('agency-logos').getPublicUrl(path);
+      setFormData((f) => ({ ...f, logo_url: publicUrl }));
+      onMessage('Logo uploaded');
+    } catch (err) {
+      onMessage(err?.message || 'Logo upload failed', true);
+    } finally {
+      setUploadingLogo(false);
+      e.target.value = '';
+    }
   };
 
   return (
@@ -230,30 +296,65 @@ function AdminAgenciesTab({ onMessage, setLoading }) {
         </table>
       </div>
       {editingAgency && (
-        <div className="admin-modal-overlay" onClick={() => setEditingAgency(null)}>
-          <div className="admin-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
+        <div className="admin-modal-overlay" onClick={() => { if (previewActive) resetPreview(); setEditingAgency(null); }}>
+          <div className="admin-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520, maxHeight: '90vh', overflowY: 'auto' }}>
             <h3>{editingAgency.id ? 'Edit Agency' : 'Create Agency'}</h3>
             <div className="admin-modal-body">
               <div className="auth-form-group">
                 <label>Agency Name *</label>
                 <input type="text" value={formData.agency_name} onChange={(e) => setFormData({ ...formData, agency_name: e.target.value })} placeholder="Agency name" />
               </div>
-              <div className="auth-form-group">
-                <label>Primary Color</label>
-                <input type="color" value={formData.primary_color || '#E12627'} onChange={(e) => setFormData({ ...formData, primary_color: e.target.value })} style={{ width: 60, height: 32 }} />
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 12, marginBottom: 16 }}>
+                {[
+                  ['primary_color', 'Primary', '#E12627'],
+                  ['secondary_color', 'Secondary', '#666'],
+                  ['accent_color', 'Accent', '#0083CB'],
+                  ['sidebar_bg', 'Sidebar BG', '#1a1a2e'],
+                  ['sidebar_text', 'Sidebar Text', '#fff'],
+                ].map(([key, label, fallback]) => (
+                  <div key={key} className="auth-form-group" style={{ margin: 0 }}>
+                    <label>{label}</label>
+                    <input type="color" value={formData[key] || fallback} onChange={(e) => setFormData({ ...formData, [key]: e.target.value })} style={{ width: '100%', height: 36, padding: 2, cursor: 'pointer' }} />
+                  </div>
+                ))}
               </div>
               <div className="auth-form-group">
-                <label>Accent Color</label>
-                <input type="color" value={formData.accent_color || '#0083CB'} onChange={(e) => setFormData({ ...formData, accent_color: e.target.value })} style={{ width: 60, height: 32 }} />
+                <label>Font Family</label>
+                <input type="text" value={formData.font_family} onChange={(e) => setFormData({ ...formData, font_family: e.target.value })} placeholder="e.g. Inter, sans-serif" />
               </div>
               <div className="auth-form-group">
-                <label>Logo URL</label>
-                <input type="text" value={formData.logo_url} onChange={(e) => setFormData({ ...formData, logo_url: e.target.value })} placeholder="https://..." />
+                <label>Logo</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <input type="text" value={formData.logo_url} onChange={(e) => setFormData({ ...formData, logo_url: e.target.value })} placeholder="https://... or upload below" style={{ flex: 1, minWidth: 160 }} />
+                  <label
+                    className="btn btn-outline btn-sm"
+                    style={{ margin: 0, cursor: editingAgency.id ? 'pointer' : 'not-allowed', opacity: editingAgency.id ? 1 : 0.6 }}
+                    title={editingAgency.id ? 'Upload logo' : 'Save agency first to upload logo'}
+                  >
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleLogoUpload}
+                      disabled={uploadingLogo || !editingAgency.id}
+                      style={{ display: 'none' }}
+                    />
+                    {uploadingLogo ? 'Uploading…' : 'Or upload'}
+                  </label>
+                </div>
+                {formData.logo_url && (
+                  <div style={{ marginTop: 6 }}>
+                    <img src={formData.logo_url} alt="Logo preview" style={{ maxWidth: 80, maxHeight: 40, objectFit: 'contain', border: '1px solid var(--border)', borderRadius: 4 }} />
+                  </div>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                <button type="button" className="btn btn-outline btn-sm" onClick={applyPreview}>Preview</button>
+                <button type="button" className="btn btn-outline btn-sm" onClick={resetPreview}>Reset Preview</button>
               </div>
             </div>
             <div className="admin-modal-footer">
-              <button type="button" className="btn btn-outline" onClick={() => setEditingAgency(null)}>Cancel</button>
-              <button type="button" className="btn btn-primary" onClick={saveAgency}>Save</button>
+              <button type="button" className="btn btn-outline" onClick={() => { if (previewActive) resetPreview(); setEditingAgency(null); }}>Cancel</button>
+              <button type="button" className="btn btn-primary" onClick={() => { if (previewActive) resetPreview(); saveAgency(); }}>Save</button>
             </div>
           </div>
         </div>
@@ -262,7 +363,7 @@ function AdminAgenciesTab({ onMessage, setLoading }) {
   );
 }
 
-function AdminUsersTab({ onMessage, setLoading, agencyId, isSuperAdmin }) {
+function AdminUsersTab({ onMessage, setLoading, agencyId, isSuperAdmin, currentUserId }) {
   const [users, setUsers] = useState([]);
   const [roles, setRoles] = useState([]);
   const [agencies, setAgencies] = useState([]);
@@ -282,13 +383,32 @@ function AdminUsersTab({ onMessage, setLoading, agencyId, isSuperAdmin }) {
       const { data: agenciesData } = await supabase.from('agencies').select('id, agency_name');
       setAgencies(agenciesData || []);
 
-      let query = supabase.from('user_profiles').select('id, email, full_name, is_active, role_id, agency_id, agencies(agency_name)').order('full_name');
+      let query = supabase.from('user_profiles').select('id, email, full_name, role_id, agency_id').order('full_name');
       if (!isSuperAdmin && agencyId) {
         query = query.eq('agency_id', agencyId);
       }
       const { data: profiles, error } = await query;
-      if (error) throw error;
-      setUsers(profiles || []);
+      if (error) {
+        console.error('[Admin] user_profiles fetch error:', error);
+        throw error;
+      }
+      const agencyMap = new Map((agenciesData || []).map((a) => [a.id, a.agency_name]));
+      let result = (profiles || []).map((p) => ({
+        ...p,
+        is_active: p.is_active ?? true,
+        agencies: p.agency_id ? { agency_name: agencyMap.get(p.agency_id) || null } : null,
+      }));
+      if (result.length === 0 && currentUserId) {
+        const { data: ownProfile } = await supabase.from('user_profiles').select('id, email, full_name, role_id, agency_id').eq('id', currentUserId).maybeSingle();
+        if (ownProfile) {
+          result = [{
+            ...ownProfile,
+            is_active: ownProfile.is_active ?? true,
+            agencies: ownProfile.agency_id ? { agency_name: agencyMap.get(ownProfile.agency_id) || null } : null,
+          }];
+        }
+      }
+      setUsers(result);
 
       const { data: ucData } = await supabase.from('user_clients').select('user_id, client_id');
       const { data: cpaData } = await supabase.from('client_platform_accounts').select('id, account_name, platform_customer_id, agency_id');
@@ -305,7 +425,7 @@ function AdminUsersTab({ onMessage, setLoading, agencyId, isSuperAdmin }) {
     } finally {
       setLoading(false);
     }
-  }, [onMessage, setLoading, agencyId, isSuperAdmin]);
+  }, [onMessage, setLoading, agencyId, isSuperAdmin, currentUserId]);
 
   useEffect(() => { loadUsers(); }, [loadUsers]);
 
@@ -426,7 +546,15 @@ function AdminUsersTab({ onMessage, setLoading, agencyId, isSuperAdmin }) {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((u) => {
+            {filtered.length === 0 ? (
+              <tr>
+                <td colSpan={7} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>
+                  {users.length === 0
+                  ? 'No users found. Check browser console for errors. Ensure your user has is_super_admin=true or admin role in user_profiles for RLS to allow reading other users.'
+                  : 'No users match your search.'}
+                </td>
+              </tr>
+            ) : filtered.map((u) => {
               const assigned = userAssignedClients[u.id] || [];
               const assignedLabel = assigned.length === 0
                 ? '—'
@@ -700,24 +828,28 @@ function AdminRolesTab({ onMessage, setLoading }) {
   );
 }
 
-function AdminClientsTab({ onMessage, setLoading, agencyId }) {
+function AdminClientsTab({ onMessage, setLoading, agencyId, isSuperAdmin }) {
   const [accounts, setAccounts] = useState([]);
   const [addModal, setAddModal] = useState(false);
-  const [formData, setFormData] = useState({ platform: 'google_ads', platform_customer_id: '', account_name: '' });
+  const [formData, setFormData] = useState({ platform: 'google_ads', platform_customer_id: '', account_name: '', agency_id: '' });
+  const [allAgencies, setAllAgencies] = useState([]);
 
   const loadAccounts = useCallback(async () => {
-    if (!agencyId) {
+    if (!isSuperAdmin && !agencyId) {
       setAccounts([]);
       setLoading(false);
       return;
     }
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('client_platform_accounts')
-        .select('*')
-        .eq('agency_id', agencyId)
+        .select('*, agencies(agency_name)')
         .order('account_name');
+      if (!isSuperAdmin) {
+        query = query.eq('agency_id', agencyId);
+      }
+      const { data, error } = await query;
       if (error) throw error;
       setAccounts(data || []);
     } catch (err) {
@@ -725,13 +857,22 @@ function AdminClientsTab({ onMessage, setLoading, agencyId }) {
     } finally {
       setLoading(false);
     }
-  }, [agencyId, onMessage, setLoading]);
+  }, [agencyId, isSuperAdmin, onMessage, setLoading]);
+
+  const loadAgencies = useCallback(async () => {
+    if (!isSuperAdmin) return;
+    const { data } = await supabase.from('agencies').select('id, agency_name').order('agency_name');
+    setAllAgencies(data || []);
+  }, [isSuperAdmin]);
+
+  useEffect(() => { loadAgencies(); }, [loadAgencies]);
 
   useEffect(() => { loadAccounts(); }, [loadAccounts]);
 
   const addAccount = async () => {
-    if (!agencyId) {
-      onMessage('No agency assigned', true);
+    const targetAgencyId = isSuperAdmin ? formData.agency_id : agencyId;
+    if (!targetAgencyId) {
+      onMessage(isSuperAdmin ? 'Please select an agency' : 'No agency assigned', true);
       return;
     }
     if (!formData.platform || !formData.platform_customer_id?.trim()) {
@@ -742,14 +883,14 @@ function AdminClientsTab({ onMessage, setLoading, agencyId }) {
       const { data: creds } = await supabase
         .from('agency_platform_credentials')
         .select('id')
-        .eq('agency_id', agencyId)
+        .eq('agency_id', targetAgencyId)
         .eq('platform', formData.platform)
         .eq('is_active', true)
         .limit(1)
         .maybeSingle();
       const credentialId = creds?.id ?? null;
       const { error } = await supabase.from('client_platform_accounts').insert({
-        agency_id: agencyId,
+        agency_id: targetAgencyId,
         credential_id: credentialId,
         platform: formData.platform,
         platform_customer_id: formData.platform_customer_id.trim(),
@@ -759,7 +900,7 @@ function AdminClientsTab({ onMessage, setLoading, agencyId }) {
       if (error) throw error;
       onMessage('Account added');
       setAddModal(false);
-      setFormData({ platform: 'google_ads', platform_customer_id: '', account_name: '' });
+      setFormData({ platform: 'google_ads', platform_customer_id: '', account_name: '', agency_id: '' });
       loadAccounts();
     } catch (err) {
       onMessage(err?.message || 'Failed to add', true);
@@ -795,11 +936,11 @@ function AdminClientsTab({ onMessage, setLoading, agencyId }) {
   return (
     <div className="admin-card">
       <div className="admin-toolbar">
-        <button type="button" className="btn btn-primary" onClick={() => { setFormData({ platform: 'google_ads', platform_customer_id: '', account_name: '' }); setAddModal(true); }}>
+        <button type="button" className="btn btn-primary" onClick={() => { setFormData({ platform: 'google_ads', platform_customer_id: '', account_name: '', agency_id: isSuperAdmin && agencyId ? agencyId : '' }); setAddModal(true); }}>
           Add Account
         </button>
       </div>
-      {!agencyId ? (
+      {!isSuperAdmin && !agencyId ? (
         <p className="admin-empty-hint">No agency assigned. You must have an agency to manage accounts.</p>
       ) : (
         <div className="table-wrapper">
@@ -807,6 +948,7 @@ function AdminClientsTab({ onMessage, setLoading, agencyId }) {
             <thead>
               <tr>
                 <th>Account Name</th>
+                {isSuperAdmin && <th>Agency</th>}
                 <th>Platform</th>
                 <th>Customer ID</th>
                 <th>Active</th>
@@ -819,6 +961,7 @@ function AdminClientsTab({ onMessage, setLoading, agencyId }) {
               {accounts.map((a) => (
                 <tr key={a.id}>
                   <td>{a.account_name || '—'}</td>
+                  {isSuperAdmin && <td>{a.agencies?.agency_name || ''}</td>}
                   <td><span className="admin-platform-badge">{a.platform}</span></td>
                   <td>{a.platform_customer_id}</td>
                   <td>
@@ -844,6 +987,17 @@ function AdminClientsTab({ onMessage, setLoading, agencyId }) {
           <div className="admin-modal" onClick={(e) => e.stopPropagation()}>
             <h3>Add Account</h3>
             <div className="admin-modal-body">
+              {isSuperAdmin && (
+                <div className="auth-form-group">
+                  <label>Agency *</label>
+                  <select value={formData.agency_id || ''} onChange={(e) => setFormData({ ...formData, agency_id: e.target.value })} required>
+                    <option value="">Select agency...</option>
+                    {allAgencies.map((a) => (
+                      <option key={a.id} value={a.id}>{a.agency_name || a.id}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="auth-form-group">
                 <label>Platform *</label>
                 <select value={formData.platform || ''} onChange={(e) => setFormData({ ...formData, platform: e.target.value })} required>
