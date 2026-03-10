@@ -176,10 +176,19 @@ export function AuthProvider({ children }) {
       const { data: cpaData, error: cpaErr } = await withTimeout(cpaQuery, SUPABASE_TIMEOUT_MS);
       if (cpaErr) console.warn('[Auth] client_platform_accounts error:', cpaErr);
 
+      let cpaFiltered = cpaData || [];
+      if (!isSuperAdmin && !viewAll) {
+        const { data: ucData } = await supabase.from('user_clients').select('client_id').eq('user_id', userId);
+        const assignedClientIds = new Set((ucData || []).map((r) => r.client_id));
+        if (assignedClientIds.size > 0) {
+          cpaFiltered = (cpaData || []).filter((r) => assignedClientIds.has(r.id));
+        }
+      }
+
       const clients = [];
       const platformMap = {};
       const clientAccounts = [];
-      (cpaData || []).forEach((r) => {
+      cpaFiltered.forEach((r) => {
         const platform = r.platform || 'google_ads';
         if (!platformMap[platform]) platformMap[platform] = [];
         if (r.platform_customer_id && !platformMap[platform].includes(String(r.platform_customer_id))) {

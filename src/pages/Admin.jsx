@@ -3,6 +3,24 @@ import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../context/AuthContext';
 
 const PLATFORMS = ['google_ads', 'facebook_ads', 'bing_ads', 'tiktok_ads', 'pinterest_ads', 'reddit_ads', 'snapchat_ads', 'linkedin_ads'];
+const CLIENT_PLATFORMS = ['google_ads', 'reddit', 'meta', 'bing', 'tiktok', 'ga4'];
+
+function formatRelativeTime(dateStr) {
+  if (!dateStr) return 'Never';
+  const diff = Date.now() - new Date(dateStr).getTime();
+  if (diff < 60000) return 'Just now';
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+  return `${Math.floor(diff / 86400000)}d ago`;
+}
+
+function statusBadge(status) {
+  if (!status) return <span className="badge badge-gray">never</span>;
+  const s = String(status).toLowerCase();
+  if (s === 'success' || s === 'completed') return <span className="badge badge-green">success</span>;
+  if (s === 'error' || s === 'failed') return <span className="badge badge-red">error</span>;
+  return <span className="badge badge-gray">{status}</span>;
+}
 const CATEGORIES = ['sidebar', 'report_tab', 'action', 'customer'];
 
 const DEFAULT_PERMISSIONS = [
@@ -372,6 +390,9 @@ function AdminUsersTab({ onMessage, setLoading, agencyId, isSuperAdmin, currentU
   const [manageClientsUser, setManageClientsUser] = useState(null);
   const [allPlatformAccounts, setAllPlatformAccounts] = useState([]);
   const [userClientAssignments, setUserClientAssignments] = useState({});
+  const [addUserModal, setAddUserModal] = useState(false);
+  const [newUserForm, setNewUserForm] = useState({ email: '', password: '', full_name: '', role_id: '', agency_id: '' });
+  const [addingUser, setAddingUser] = useState(false);
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
@@ -506,6 +527,59 @@ function AdminUsersTab({ onMessage, setLoading, agencyId, isSuperAdmin, currentU
     }
   };
 
+  const createUser = async () => {
+    const { email, password, full_name, role_id, agency_id } = newUserForm;
+    if (!email?.trim()) {
+      onMessage('Email is required', true);
+      return;
+    }
+    if (!password || password.length < 6) {
+      onMessage('Password must be at least 6 characters', true);
+      return;
+    }
+    setAddingUser(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const prevSession = sessionData?.session;
+
+      const { data, error } = await supabase.auth.signUp({
+        email: String(email).trim(),
+        password: String(password),
+        options: { data: { full_name: full_name?.trim() || null } },
+      });
+      if (error) throw error; // User already exists, etc.
+
+      const newUserId = data?.user?.id;
+      if (!newUserId) throw new Error('User created but no ID returned');
+
+      const updates = {};
+      if (role_id) updates.role_id = role_id;
+      if (agency_id && isSuperAdmin) updates.agency_id = agency_id;
+      else if (agencyId && !isSuperAdmin) updates.agency_id = agencyId;
+
+      if (Object.keys(updates).length > 0) {
+        const { error: updErr } = await supabase.from('user_profiles').update(updates).eq('id', newUserId);
+        if (updErr) console.warn('[Admin] user_profiles update after create:', updErr);
+      }
+
+      if (prevSession) {
+        await supabase.auth.setSession({
+          access_token: prevSession.access_token,
+          refresh_token: prevSession.refresh_token,
+        });
+      }
+
+      onMessage('User created successfully');
+      setAddUserModal(false);
+      setNewUserForm({ email: '', password: '', full_name: '', role_id: '', agency_id: '' });
+      loadUsers();
+    } catch (err) {
+      onMessage(err?.message || 'Failed to create user', true);
+    } finally {
+      setAddingUser(false);
+    }
+  };
+
   const toggleClient = (userId, clientId) => {
     setUserClientAssignments((prev) => {
       const prevSet = prev[userId] || new Set();
@@ -523,7 +597,7 @@ function AdminUsersTab({ onMessage, setLoading, agencyId, isSuperAdmin, currentU
 
   return (
     <div className="admin-card">
-      <div className="admin-toolbar">
+      <div className="admin-toolbar" style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
         <input
           type="text"
           placeholder="Search by name or email..."
@@ -531,6 +605,9 @@ function AdminUsersTab({ onMessage, setLoading, agencyId, isSuperAdmin, currentU
           onChange={(e) => setSearch(e.target.value)}
           className="admin-search"
         />
+        <button type="button" className="btn btn-primary btn-sm" onClick={() => setAddUserModal(true)}>
+          Add User
+        </button>
       </div>
       <div className="table-wrapper">
         <table className="data-table gads-table">
@@ -643,6 +720,75 @@ function AdminUsersTab({ onMessage, setLoading, agencyId, isSuperAdmin, currentU
             <div className="admin-modal-footer">
               <button type="button" className="btn btn-outline" onClick={() => setManageClientsUser(null)}>Cancel</button>
               <button type="button" className="btn btn-primary" onClick={saveUserClients}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {addUserModal && (
+        <div className="admin-modal-overlay" onClick={() => !addingUser && setAddUserModal(false)}>
+          <div className="admin-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 420 }}>
+            <h3>Add User</h3>
+            <div className="admin-modal-body">
+              <div className="auth-form-group">
+                <label>Email *</label>
+                <input
+                  type="email"
+                  value={newUserForm.email}
+                  onChange={(e) => setNewUserForm((f) => ({ ...f, email: e.target.value }))}
+                  placeholder="user@example.com"
+                />
+              </div>
+              <div className="auth-form-group">
+                <label>Password * (min 6 chars)</label>
+                <input
+                  type="password"
+                  value={newUserForm.password}
+                  onChange={(e) => setNewUserForm((f) => ({ ...f, password: e.target.value }))}
+                  placeholder="••••••••"
+                />
+              </div>
+              <div className="auth-form-group">
+                <label>Full Name</label>
+                <input
+                  type="text"
+                  value={newUserForm.full_name}
+                  onChange={(e) => setNewUserForm((f) => ({ ...f, full_name: e.target.value }))}
+                  placeholder="John Doe"
+                />
+              </div>
+              <div className="auth-form-group">
+                <label>Role</label>
+                <select
+                  className="admin-role-select"
+                  value={newUserForm.role_id}
+                  onChange={(e) => setNewUserForm((f) => ({ ...f, role_id: e.target.value }))}
+                >
+                  <option value="">— Select role —</option>
+                  {roles.map((r) => (
+                    <option key={r.id} value={r.id}>{r.name || r.role_name || String(r.id)}</option>
+                  ))}
+                </select>
+              </div>
+              {isSuperAdmin && (
+                <div className="auth-form-group">
+                  <label>Agency</label>
+                  <select
+                    className="admin-role-select"
+                    value={newUserForm.agency_id}
+                    onChange={(e) => setNewUserForm((f) => ({ ...f, agency_id: e.target.value }))}
+                  >
+                    <option value="">— No agency —</option>
+                    {agencies.map((a) => (
+                      <option key={a.id} value={a.id}>{a.agency_name || a.id}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+            <div className="admin-modal-footer">
+              <button type="button" className="btn btn-outline" onClick={() => !addingUser && setAddUserModal(false)} disabled={addingUser}>Cancel</button>
+              <button type="button" className="btn btn-primary" onClick={createUser} disabled={addingUser}>{addingUser ? 'Creating…' : 'Create User'}</button>
             </div>
           </div>
         </div>
@@ -952,8 +1098,8 @@ function AdminClientsTab({ onMessage, setLoading, agencyId, isSuperAdmin }) {
                 <th>Platform</th>
                 <th>Customer ID</th>
                 <th>Active</th>
-                <th>Last Sync</th>
-                <th>Sync Status</th>
+                <th>Last Synced</th>
+                <th>Last Status</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -970,8 +1116,8 @@ function AdminClientsTab({ onMessage, setLoading, agencyId, isSuperAdmin }) {
                       <span />
                     </label>
                   </td>
-                  <td>{a.last_sync_at ? new Date(a.last_sync_at).toLocaleString() : '—'}</td>
-                  <td>{a.sync_status || '—'}</td>
+                  <td>{formatRelativeTime(a.last_sync_at)}</td>
+                  <td>{statusBadge(a.sync_status)}</td>
                   <td>
                     <button type="button" className="btn btn-outline btn-sm" onClick={() => deleteAccount(a)}>Delete</button>
                   </td>
@@ -1002,7 +1148,7 @@ function AdminClientsTab({ onMessage, setLoading, agencyId, isSuperAdmin }) {
                 <label>Platform *</label>
                 <select value={formData.platform || ''} onChange={(e) => setFormData({ ...formData, platform: e.target.value })} required>
                   <option value="">Select platform...</option>
-                  {PLATFORMS.map((p) => (
+                  {CLIENT_PLATFORMS.map((p) => (
                     <option key={p} value={p}>{p}</option>
                   ))}
                 </select>

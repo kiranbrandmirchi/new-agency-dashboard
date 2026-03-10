@@ -11,6 +11,7 @@ import { Header } from './components/Header';
 import { NotificationContainer } from './components/Notification';
 import { CombinedDashboardPage } from './pages/CombinedDashboardPage';
 import { GoogleAdsPage } from './pages/GoogleAdsPage';
+import { RedditPage } from './pages/RedditPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
 import { Admin } from './pages/Admin';
@@ -39,6 +40,7 @@ function CurrentPage() {
 
   if (currentPage === 'dashboard') return <CombinedDashboardPage />;
   if (currentPage === 'google-ads') return <GoogleAdsPage />;
+  if (currentPage === 'reddit-ads') return <RedditPage />;
   if (currentPage === 'settings') return <SettingsPage />;
 
   const config = PLACEHOLDER_PAGES[currentPage];

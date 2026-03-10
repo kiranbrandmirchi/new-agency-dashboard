@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useApp } from '../context/AppContext';
 import { supabase } from '../lib/supabaseClient';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
@@ -8,21 +9,23 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 export function OAuthCallback() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { session, activeAgencyId, signOut } = useAuth();
+  const { session, activeAgencyId } = useAuth();
+  const { showNotification, showPage } = useApp();
 
   const code = searchParams.get('code');
   const stateParam = searchParams.get('state');
   const errorParam = searchParams.get('error');
 
-  const stateAgencyId = (() => {
-    if (!stateParam) return null;
+  const stateParsed = (() => {
+    if (!stateParam) return {};
     try {
-      const parsed = JSON.parse(stateParam);
-      return parsed?.agency_id || null;
+      return JSON.parse(stateParam) || {};
     } catch {
-      return null;
+      return {};
     }
   })();
+  const stateAgencyId = stateParsed?.agency_id || null;
+  const statePlatform = stateParsed?.platform || 'google_ads';
   const effectiveAgencyId = stateAgencyId || activeAgencyId;
 
   const [step, setStep] = useState('loading');
@@ -56,8 +59,42 @@ export function OAuthCallback() {
       setStep('error');
       return;
     }
+    if (statePlatform === 'reddit') {
+      setStep('reddit_exchange');
+      return;
+    }
     setStep('mcc');
-  }, [code, errorParam, session, effectiveAgencyId]);
+  }, [code, errorParam, session, effectiveAgencyId, statePlatform]);
+
+  useEffect(() => {
+    if (step !== 'reddit_exchange' || !code || !session || !effectiveAgencyId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error: fnError } = await supabase.functions.invoke('reddit-oauth-connect', {
+          body: {
+            action: 'exchange_code',
+            code,
+            redirect_uri: redirectUri,
+            agency_id: effectiveAgencyId,
+          },
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+        if (cancelled) return;
+        if (fnError) throw fnError;
+        if (data?.error) throw new Error(data.error);
+        showNotification?.('Reddit Ads connected successfully');
+        showPage?.('settings');
+        navigate('/');
+      } catch (err) {
+        if (cancelled) return;
+        showNotification?.(err?.message || 'Failed to connect Reddit Ads');
+        showPage?.('settings');
+        navigate('/');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [step, code, session, effectiveAgencyId, redirectUri, navigate, showNotification, showPage]);
 
   const handleExchangeCode = async (e) => {
     e.preventDefault();
