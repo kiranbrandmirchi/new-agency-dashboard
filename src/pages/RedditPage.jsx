@@ -93,10 +93,8 @@ export function RedditPage() {
     setTimeout(() => fetchData(), 30);
   }, [batchUpdateFilters, fetchData]);
 
-  const selectedCustomerIds = filters.customerIds || [];
   const handleAccountChange = (e) => {
-    const opts = Array.from(e.target.selectedOptions).map((o) => o.value);
-    updateFilter('customerIds', opts);
+    updateFilter('customerId', e.target.value);
   };
 
   useEffect(() => {
@@ -253,9 +251,12 @@ export function RedditPage() {
         <div className="gads-filter-bar" id="gads-filter-bar">
           <div className="gads-filter-row">
             <div className="gads-filter-group gads-fg-sm">
-              <label>Reddit Accounts</label>
-              <select multiple value={selectedCustomerIds} onChange={handleAccountChange} style={{ minHeight: 80 }}>
-                {redditAccounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              <label>Account</label>
+              <select value={filters.customerId || 'ALL'} onChange={handleAccountChange}>
+                <option value="ALL">All Accounts</option>
+                {redditAccounts.map((a) => (
+                  <option key={a.id} value={a.id}>{a.name}</option>
+                ))}
               </select>
             </div>
             <div className="gads-filter-group gads-filter-actions" style={{ display: 'flex', flexDirection: 'row', alignItems: 'flex-end', gap: 8 }}>

@@ -53,7 +53,7 @@ export function useRedditData() {
     datePreset: 'this_month',
     dateFrom: '',
     dateTo: '',
-    customerIds: [],
+    customerId: 'ALL',
   });
 
   const [rawCampaigns, setRawCampaigns] = useState([]);
@@ -97,7 +97,9 @@ export function useRedditData() {
       }
       setRedditAccounts(accounts);
 
-      let customerIds = filters.customerIds && filters.customerIds.length > 0 ? filters.customerIds : accounts.map((a) => a.id);
+      let customerIds = filters.customerId && filters.customerId !== 'ALL'
+        ? [filters.customerId]
+        : accounts.map((a) => a.id);
 
       if (customerIds.length === 0) {
         setRawCampaigns([]);
@@ -146,11 +148,18 @@ export function useRedditData() {
     } finally {
       setLoading(false);
     }
-  }, [filters.datePreset, filters.dateFrom, filters.dateTo, filters.customerIds, activeAgencyId, allowedClientAccounts]);
+  }, [filters.datePreset, filters.dateFrom, filters.dateTo, filters.customerId, activeAgencyId, allowedClientAccounts]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    const cid = filters.customerId;
+    if (cid && cid !== 'ALL' && redditAccounts.length > 0 && !redditAccounts.some((a) => a.id === cid)) {
+      setFilters((prev) => ({ ...prev, customerId: 'ALL' }));
+    }
+  }, [redditAccounts, filters.customerId]);
 
   const kpis = useMemo(() => {
     const rows = rawCampaigns;

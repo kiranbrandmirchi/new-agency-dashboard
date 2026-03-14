@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabaseClient';
@@ -62,6 +62,7 @@ export function SettingsPage() {
   const [syncingAll, setSyncingAll] = useState(false);
   const [syncProgress, setSyncProgress] = useState(null);
   const [syncLogs, setSyncLogs] = useState({});
+  const [lastDayByAccount, setLastDayByAccount] = useState({});
   const [expandedSyncHistory, setExpandedSyncHistory] = useState(null);
 
   const [datePreset, setDatePreset] = useState('last7');
@@ -151,8 +152,47 @@ export function SettingsPage() {
     }
   }, [activeAgencyId]);
 
+  const getLastDayOfData = useCallback((customerId, platform) => {
+    const key = `${platform}:${customerId}`;
+    if (lastDayByAccount[key]) return lastDayByAccount[key];
+    const logs = syncLogs[key] || [];
+    const successLogs = logs.filter((l) => l.status === 'success' || l.status === 'synced');
+    if (!successLogs.length) return null;
+    return successLogs.reduce((max, l) => (l.date_to && (!max || l.date_to > max)) ? l.date_to : max, null);
+  }, [syncLogs, lastDayByAccount]);
+
   useEffect(() => { fetchCredentials(); }, [fetchCredentials]);
   useEffect(() => { fetchAccounts(); }, [fetchAccounts]);
+
+  const fetchLastDayPerAccount = useCallback(async (platform, customerIds) => {
+    if (!activeAgencyId || !customerIds?.length) return;
+    try {
+      const { data, error } = await supabase
+        .from('sync_log')
+        .select('customer_id, date_to')
+        .eq('agency_id', activeAgencyId)
+        .eq('platform', platform)
+        .in('customer_id', customerIds)
+        .in('status', ['success', 'synced']);
+      if (error) throw error;
+      const byCustomer = {};
+      (data || []).forEach((r) => {
+        if (r.date_to && (!byCustomer[r.customer_id] || r.date_to > byCustomer[r.customer_id])) {
+          byCustomer[r.customer_id] = r.date_to;
+        }
+      });
+      setLastDayByAccount((prev) => ({ ...prev, ...Object.fromEntries(Object.entries(byCustomer).map(([k, v]) => [`${platform}:${k}`, v])) }));
+    } catch (err) {
+      console.warn('[Settings] lastDay fetch error:', err);
+    }
+  }, [activeAgencyId]);
+
+  useEffect(() => {
+    const gads = accounts.filter((a) => a.is_active && a.platform === 'google_ads').map((a) => a.platform_customer_id);
+    const reddit = accounts.filter((a) => a.is_active && a.platform === 'reddit').map((a) => a.platform_customer_id);
+    if (gads.length) fetchLastDayPerAccount('google_ads', gads);
+    if (reddit.length) fetchLastDayPerAccount('reddit', reddit);
+  }, [accounts, activeAgencyId, fetchLastDayPerAccount]);
 
   useEffect(() => {
     if (activeAgency) {
@@ -190,7 +230,7 @@ export function SettingsPage() {
     }
   }, [activeAgencyId]);
 
-  const syncRedditWithChunking = useCallback(async (accountId, dateFrom, dateTo, accessToken, onProgress) => {
+  const syncRedditWithChunking = useCallback(async (customerId, dateFrom, dateTo, onProgress) => {
     const chunks = [];
     const start = new Date(dateFrom);
     const end = new Date(dateTo);
@@ -207,11 +247,15 @@ export function SettingsPage() {
       const chunk = chunks[i];
       if (onProgress) onProgress({ current: i + 1, total: chunks.length, dateFrom: chunk.start, dateTo: chunk.end, status: `Syncing ${chunk.start} → ${chunk.end} (${i + 1}/${chunks.length})`, rows: totalRows });
       const { data, error } = await supabase.functions.invoke('reddit-full-sync', {
-        body: { start_date: chunk.start, end_date: chunk.end },
-        headers: { Authorization: `Bearer ${accessToken}` },
+        body: {
+          customer_id: customerId,
+          mode: 'backfill',
+          date_from: chunk.start,
+          date_to: chunk.end,
+        },
       });
       if (error) {
-        await insertSyncLog(accountId, { dateFrom: chunk.start, dateTo: chunk.end, status: 'error', rowsSynced: 0, errorMessage: error.message }, 'reddit');
+        await insertSyncLog(customerId, { dateFrom: chunk.start, dateTo: chunk.end, status: 'error', rowsSynced: 0, errorMessage: error.message }, 'reddit');
         continue;
       }
       let chunkRows = 0;
@@ -219,7 +263,7 @@ export function SettingsPage() {
         chunkRows += (r.ad_group || 0) + (r.community || 0) + (r.placement || 0);
       }
       totalRows += chunkRows;
-      await insertSyncLog(accountId, { dateFrom: chunk.start, dateTo: chunk.end, status: 'success', rowsSynced: chunkRows }, 'reddit');
+      await insertSyncLog(customerId, { dateFrom: chunk.start, dateTo: chunk.end, status: 'success', rowsSynced: chunkRows }, 'reddit');
     }
     return { success: true, totalRows };
   }, [insertSyncLog]);
@@ -413,11 +457,9 @@ export function SettingsPage() {
     setSyncingAccount(account.id);
     setSyncProgress({ accountId: account.id, status: 'Starting...' });
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) { showNotification('Please sign in first.'); return; }
       const { dateFrom, dateTo } = getRedditDateRange();
       const result = await syncRedditWithChunking(
-        account.platform_customer_id, dateFrom, dateTo, session.access_token,
+        account.platform_customer_id, dateFrom, dateTo,
         (p) => setSyncProgress({ accountId: account.id, accountName: account.account_name, ...p })
       );
       showNotification(`Synced ${account.account_name}: ${result.totalRows} rows`);
@@ -439,12 +481,10 @@ export function SettingsPage() {
     const { dateFrom, dateTo } = getRedditDateRange();
     let totalAll = 0;
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
       for (const account of redditAccounts) {
         setSyncProgress({ accountId: account.id, accountName: account.account_name, status: 'Starting...' });
         const result = await syncRedditWithChunking(
-          account.platform_customer_id, dateFrom, dateTo, session.access_token,
+          account.platform_customer_id, dateFrom, dateTo,
           (p) => setSyncProgress({ accountId: account.id, accountName: account.account_name, ...p })
         );
         totalAll += result.totalRows;
@@ -563,78 +603,96 @@ export function SettingsPage() {
               <table className="data-table">
                 <thead>
                   <tr>
+                    <th style={{ width: 28 }} />
                     <th>Account Name</th>
                     <th>{platform === 'google_ads' ? 'Customer ID' : 'Account ID'}</th>
                     {platform === 'google_ads' && <th>Auto-Sync</th>}
                     <th>Last Synced</th>
+                    <th>Last Day of Data</th>
                     <th>Last Status</th>
                     <th>Active</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {accountsList.map((acc) => (
-                    <tr key={acc.id}>
-                      <td>{acc.account_name || ''}</td>
-                      <td>{acc.platform_customer_id}</td>
-                      {platform === 'google_ads' && (
-                        <td>
-                          <label className="admin-toggle">
-                            <input type="checkbox" checked={!!acc.auto_sync_enabled} onChange={() => handleToggleAutoSync(acc)} disabled={togglingAccount === acc.id} />
-                            <span />
-                          </label>
-                        </td>
-                      )}
-                      <td>{formatRelativeTime(acc.last_sync_at)}</td>
-                      <td><span className={`badge ${statusBadge(acc.sync_status || acc.last_sync_status)}`}>{acc.sync_status || acc.last_sync_status || 'never'}</span></td>
-                      <td>
-                        <button type="button" className={`btn btn-sm ${acc.is_active ? 'btn-outline' : 'btn-primary'}`} onClick={() => handleToggleAccount(acc)} disabled={togglingAccount === acc.id}>
-                          {togglingAccount === acc.id ? '…' : acc.is_active ? 'Deactivate' : 'Activate'}
-                        </button>
-                      </td>
-                      <td>
-                        <button type="button" className="btn btn-accent btn-sm" onClick={() => onSync(acc)} disabled={syncingAccount === acc.id || syncingAll}>
-                          {syncingAccount === acc.id ? 'Syncing…' : 'Sync Now'}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {accountsList.map((acc) => {
+                    const syncKey = `${platform}:${acc.platform_customer_id}`;
+                    const isExpanded = expandedSyncHistory === syncKey;
+                    const logs = syncLogs[syncKey] || [];
+                    const lastDay = getLastDayOfData(acc.platform_customer_id, platform);
+                    return (
+                      <React.Fragment key={acc.id}>
+                        <tr>
+                          <td>
+                            <button
+                              type="button"
+                              className="btn btn-outline btn-sm"
+                              style={{ padding: '2px 6px', minWidth: 24 }}
+                              onClick={() => {
+                                setExpandedSyncHistory(isExpanded ? null : syncKey);
+                                if (!isExpanded) fetchSyncLogs(acc.platform_customer_id, platform);
+                              }}
+                              title="Sync History"
+                            >
+                              {isExpanded ? '▼' : '▶'}
+                            </button>
+                          </td>
+                          <td>{acc.account_name || ''}</td>
+                          <td>{acc.platform_customer_id}</td>
+                          {platform === 'google_ads' && (
+                            <td>
+                              <label className="admin-toggle">
+                                <input type="checkbox" checked={!!acc.auto_sync_enabled} onChange={() => handleToggleAutoSync(acc)} disabled={togglingAccount === acc.id} />
+                                <span />
+                              </label>
+                            </td>
+                          )}
+                          <td>{formatRelativeTime(acc.last_sync_at)}</td>
+                          <td>{lastDay || '—'}</td>
+                          <td><span className={`badge ${statusBadge(acc.sync_status || acc.last_sync_status)}`}>{acc.sync_status || acc.last_sync_status || 'never'}</span></td>
+                          <td>
+                            <button type="button" className={`btn btn-sm ${acc.is_active ? 'btn-outline' : 'btn-primary'}`} onClick={() => handleToggleAccount(acc)} disabled={togglingAccount === acc.id}>
+                              {togglingAccount === acc.id ? '…' : acc.is_active ? 'Deactivate' : 'Activate'}
+                            </button>
+                          </td>
+                          <td>
+                            <button type="button" className="btn btn-accent btn-sm" onClick={() => onSync(acc)} disabled={syncingAccount === acc.id || syncingAll}>
+                              {syncingAccount === acc.id ? 'Syncing…' : 'Sync Now'}
+                            </button>
+                          </td>
+                        </tr>
+                        {isExpanded && (
+                          <tr>
+                            <td colSpan={platform === 'google_ads' ? 9 : 8} style={{ padding: 0, verticalAlign: 'top', borderTop: 'none' }}>
+                              <div style={{ padding: 12, background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border)' }}>
+                                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--text-muted)' }}>Sync History</div>
+                                {logs.length === 0 ? (
+                                  <p style={{ color: 'var(--text-muted)', fontSize: 12, margin: 0 }}>No sync history yet.</p>
+                                ) : (
+                                  <table className="data-table" style={{ fontSize: 12 }}>
+                                    <thead><tr><th>Date Range</th><th>Status</th><th>Rows</th><th>Time</th></tr></thead>
+                                    <tbody>
+                                      {logs.map((log) => (
+                                        <tr key={log.id}>
+                                          <td>{log.date_from} – {log.date_to}</td>
+                                          <td><span className={`badge ${statusBadge(log.status)}`}>{log.status}</span></td>
+                                          <td>{log.rows_synced ?? 0}</td>
+                                          <td>{log.started_at ? new Date(log.started_at).toLocaleString() : '—'}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
-          </div>
-        )}
-
-        {accountsList.length > 0 && (
-          <div style={{ marginTop: 16 }}>
-            {accountsList.map((acc) => (
-              <div key={acc.id} style={{ marginBottom: 8 }}>
-                <button type="button" className="btn btn-outline btn-sm" onClick={() => { setExpandedSyncHistory(expandedSyncHistory === `${platform}:${acc.platform_customer_id}` ? null : `${platform}:${acc.platform_customer_id}`); if (expandedSyncHistory !== `${platform}:${acc.platform_customer_id}`) fetchSyncLogs(acc.platform_customer_id, platform); }}>
-                  {expandedSyncHistory === `${platform}:${acc.platform_customer_id}` ? '▼' : '▶'} Sync History: {acc.account_name || acc.platform_customer_id}
-                </button>
-                {expandedSyncHistory === `${platform}:${acc.platform_customer_id}` && (
-                  <div style={{ marginTop: 8, padding: 12, background: 'var(--bg-secondary)', borderRadius: 8, border: '1px solid var(--border)', maxHeight: 200, overflowY: 'auto' }}>
-                    {(syncLogs[`${platform}:${acc.platform_customer_id}`] || []).length === 0 ? (
-                      <p style={{ color: 'var(--text-muted)', fontSize: 12 }}>No sync history yet.</p>
-                    ) : (
-                      <table className="data-table" style={{ fontSize: 12 }}>
-                        <thead><tr><th>Date Range</th><th>Status</th><th>Rows</th><th>Time</th></tr></thead>
-                        <tbody>
-                          {(syncLogs[`${platform}:${acc.platform_customer_id}`] || []).map((log) => (
-                            <tr key={log.id}>
-                              <td>{log.date_from} – {log.date_to}</td>
-                              <td><span className={`badge ${statusBadge(log.status)}`}>{log.status}</span></td>
-                              <td>{log.rows_synced ?? 0}</td>
-                              <td>{log.started_at ? new Date(log.started_at).toLocaleString() : '—'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    )}
-                  </div>
-                )}
-              </div>
-            ))}
           </div>
         )}
       </>
