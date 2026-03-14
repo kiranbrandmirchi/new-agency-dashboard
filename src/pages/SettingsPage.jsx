@@ -190,6 +190,40 @@ export function SettingsPage() {
     }
   }, [activeAgencyId]);
 
+  const syncRedditWithChunking = useCallback(async (accountId, dateFrom, dateTo, accessToken, onProgress) => {
+    const chunks = [];
+    const start = new Date(dateFrom);
+    const end = new Date(dateTo);
+    const cur = new Date(start);
+    while (cur <= end) {
+      const chunkEnd = new Date(cur);
+      chunkEnd.setDate(chunkEnd.getDate() + 2);
+      if (chunkEnd > end) chunkEnd.setTime(end.getTime());
+      chunks.push({ start: cur.toISOString().split('T')[0], end: chunkEnd.toISOString().split('T')[0] });
+      cur.setDate(chunkEnd.getDate() + 1);
+    }
+    let totalRows = 0;
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      if (onProgress) onProgress({ current: i + 1, total: chunks.length, dateFrom: chunk.start, dateTo: chunk.end, status: `Syncing ${chunk.start} → ${chunk.end} (${i + 1}/${chunks.length})`, rows: totalRows });
+      const { data, error } = await supabase.functions.invoke('reddit-full-sync', {
+        body: { start_date: chunk.start, end_date: chunk.end },
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (error) {
+        await insertSyncLog(accountId, { dateFrom: chunk.start, dateTo: chunk.end, status: 'error', rowsSynced: 0, errorMessage: error.message }, 'reddit');
+        continue;
+      }
+      let chunkRows = 0;
+      for (const r of Object.values(data?.results || {})) {
+        chunkRows += (r.ad_group || 0) + (r.community || 0) + (r.placement || 0);
+      }
+      totalRows += chunkRows;
+      await insertSyncLog(accountId, { dateFrom: chunk.start, dateTo: chunk.end, status: 'success', rowsSynced: chunkRows }, 'reddit');
+    }
+    return { success: true, totalRows };
+  }, [insertSyncLog]);
+
   const handleSyncAccount = async (account) => {
     setSyncingAccount(account.id);
     setSyncProgress({ accountId: account.id, current: 0, total: 0, dateFrom: '', dateTo: '', status: '', rows: 0 });
@@ -377,18 +411,19 @@ export function SettingsPage() {
 
   const handleSyncRedditAccount = async (account) => {
     setSyncingAccount(account.id);
-    setSyncProgress({ accountId: account.id, status: 'Starting…' });
+    setSyncProgress({ accountId: account.id, status: 'Starting...' });
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) { showNotification('Please sign in first.'); return; }
       const { dateFrom, dateTo } = getRedditDateRange();
-      const { data, error } = await supabase.functions.invoke('reddit-full-sync', {
-        body: { account_ids: [account.platform_customer_id], start_date: dateFrom, end_date: dateTo },
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      });
-      if (error) throw error;
-      showNotification(data?.message || 'Reddit sync initiated');
+      const result = await syncRedditWithChunking(
+        account.platform_customer_id, dateFrom, dateTo, session.access_token,
+        (p) => setSyncProgress({ accountId: account.id, accountName: account.account_name, ...p })
+      );
+      showNotification(`Synced ${account.account_name}: ${result.totalRows} rows`);
+      await supabase.from('client_platform_accounts').update({ last_sync_at: new Date().toISOString(), sync_status: 'success' }).eq('id', account.id);
       await fetchAccounts();
+      await fetchSyncLogs(account.platform_customer_id, 'reddit');
     } catch (err) {
       showNotification(err?.message || 'Reddit sync failed');
     } finally {
@@ -399,26 +434,30 @@ export function SettingsPage() {
 
   const handleSyncAllReddit = async () => {
     const redditAccounts = accounts.filter((a) => a.is_active && a.platform === 'reddit');
-    if (redditAccounts.length === 0) {
-      showNotification('No active Reddit accounts to sync.');
-      return;
-    }
+    if (!redditAccounts.length) { showNotification('No active Reddit accounts.'); return; }
     setSyncingAll(true);
     const { dateFrom, dateTo } = getRedditDateRange();
+    let totalAll = 0;
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
-      const { data, error } = await supabase.functions.invoke('reddit-full-sync', {
-        body: { account_ids: redditAccounts.map((a) => a.platform_customer_id), start_date: dateFrom, end_date: dateTo },
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      });
-      if (error) throw error;
-      showNotification(data?.message || 'Reddit sync initiated');
+      for (const account of redditAccounts) {
+        setSyncProgress({ accountId: account.id, accountName: account.account_name, status: 'Starting...' });
+        const result = await syncRedditWithChunking(
+          account.platform_customer_id, dateFrom, dateTo, session.access_token,
+          (p) => setSyncProgress({ accountId: account.id, accountName: account.account_name, ...p })
+        );
+        totalAll += result.totalRows;
+        await supabase.from('client_platform_accounts').update({ last_sync_at: new Date().toISOString(), sync_status: 'success' }).eq('id', account.id);
+        await fetchSyncLogs(account.platform_customer_id, 'reddit');
+      }
+      showNotification(`Reddit sync complete: ${totalAll} total rows`);
       await fetchAccounts();
     } catch (err) {
-      showNotification(err?.message || 'Reddit sync failed');
+      showNotification(err?.message || 'Sync failed');
     } finally {
       setSyncingAll(false);
+      setSyncProgress(null);
     }
   };
 
