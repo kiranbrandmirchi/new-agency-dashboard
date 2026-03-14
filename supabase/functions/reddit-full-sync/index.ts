@@ -1,490 +1,414 @@
 // supabase/functions/reddit-full-sync/index.ts
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type"
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS"
 };
-// From Supabase secrets
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-const REDDIT_CLIENT_ID = Deno.env.get("REDDIT_CLIENT_ID");
-const REDDIT_CLIENT_SECRET = Deno.env.get("REDDIT_CLIENT_SECRET");
-const REDDIT_ADS_API_URL = "https://ads-api.reddit.com/api/v3";
-const USER_AGENT = "MyApp/1.0";
-const BREAKDOWNS_AD_GROUP = [
-  "DATE",
-  "CAMPAIGN_ID",
-  "AD_GROUP_ID"
-];
-const BREAKDOWNS_COMMUNITY = [
-  "DATE",
-  "CAMPAIGN_ID",
-  "COMMUNITY"
-];
-const BREAKDOWNS_PLACEMENT = [
-  "DATE",
-  "CAMPAIGN_ID",
-  "PLACEMENT"
-];
-const REPORT_FIELDS = [
-  "IMPRESSIONS",
-  "CLICKS",
-  "SPEND",
-  "CONVERSION_PURCHASE_VIEWS",
-  "CONVERSION_PURCHASE_CLICKS",
-  "CONVERSION_PURCHASE_TOTAL_VALUE"
-];
-// ============ HELPER FUNCTIONS ============
-async function refreshAccessToken(refreshToken) {
-  const response = await fetch("https://www.reddit.com/api/v1/access_token", {
-    method: "POST",
+function jsonRes(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
     headers: {
-      "Authorization": "Basic " + btoa(`${REDDIT_CLIENT_ID}:${REDDIT_CLIENT_SECRET}`),
-      "Content-Type": "application/x-www-form-urlencoded",
-      "User-Agent": USER_AGENT
-    },
-    body: `grant_type=refresh_token&refresh_token=${refreshToken}`
-  });
-  if (response.status !== 200) {
-    const text = await response.text();
-    throw new Error(`Token refresh failed: ${response.status} - ${text}`);
-  }
-  const result = await response.json();
-  console.log("Access token refreshed successfully");
-  return result.access_token;
-}
-async function fetchReport(accessToken, accountId, startDate, endDate, breakdowns) {
-  const url = `${REDDIT_ADS_API_URL}/ad_accounts/${accountId}/reports`;
-  const headers = {
-    "Authorization": `Bearer ${accessToken}`,
-    "User-Agent": USER_AGENT,
-    "Content-Type": "application/json"
-  };
-  const body = {
-    data: {
-      starts_at: `${startDate}T00:00:00Z`,
-      ends_at: `${endDate}T00:00:00Z`,
-      breakdowns,
-      fields: REPORT_FIELDS
-    }
-  };
-  console.log(`Fetching report: breakdowns=${breakdowns.join(",")}, ${startDate} to ${endDate}`);
-  let response = await fetch(url, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body)
-  });
-  if (response.status !== 200) {
-    const text = await response.text();
-    console.error(`Report error ${response.status}: ${text}`);
-    return [];
-  }
-  let result = await response.json();
-  const dataObj = result.data || {};
-  const data = Array.isArray(dataObj.metrics) ? dataObj.metrics : [];
-  console.log(`Got ${data.length} rows`);
-  // Handle pagination
-  let nextCursor = result.pagination?.next_cursor;
-  while(nextCursor){
-    console.log("Fetching next page...");
-    body.data.cursor = nextCursor;
-    response = await fetch(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body)
-    });
-    if (response.status !== 200) break;
-    result = await response.json();
-    const pageData = result.data?.metrics || [];
-    data.push(...pageData);
-    nextCursor = result.pagination?.next_cursor;
-  }
-  return data;
-}
-async function fetchJson(accessToken, url) {
-  const response = await fetch(url, {
-    headers: {
-      "Authorization": `Bearer ${accessToken}`,
-      "User-Agent": USER_AGENT
+      ...corsHeaders,
+      "Content-Type": "application/json"
     }
   });
-  if (response.status === 200) {
-    const json = await response.json();
-    return json.data || {};
-  }
-  return {};
 }
-async function buildLookups(accessToken, reportData) {
-  const campaignIds = new Set();
-  const adGroupIds = new Set();
-  for (const row of reportData){
-    if (row.campaign_id) campaignIds.add(row.campaign_id);
-    if (row.ad_group_id) adGroupIds.add(row.ad_group_id);
-  }
-  console.log(`Building lookups: ${campaignIds.size} campaigns, ${adGroupIds.size} ad groups`);
-  const campaigns = {};
-  const adGroups = {};
-  for (const cid of campaignIds){
-    const c = await fetchJson(accessToken, `${REDDIT_ADS_API_URL}/campaigns/${cid}`);
-    if (c.name) campaigns[cid] = c.name;
-  }
-  for (const agid of adGroupIds){
-    const ag = await fetchJson(accessToken, `${REDDIT_ADS_API_URL}/ad_groups/${agid}`);
-    if (ag.name) adGroups[agid] = ag.name;
-  }
-  return {
-    campaigns,
-    ad_groups: adGroups
-  };
-}
-// ============ TRANSFORM FUNCTIONS ============
-function transformRowAdGroup(row, lookups) {
-  const spend = Number(row.spend || 0);
-  const totalValue = Number(row.conversion_purchase_total_value || 0);
-  return {
-    campaign_name: lookups.campaigns[row.campaign_id] || null,
-    ad_group_name: lookups.ad_groups[row.ad_group_id] || null,
-    campaign_date: row.date,
-    impressions: parseInt(row.impressions || "0"),
-    clicks: parseInt(row.clicks || "0"),
-    amount_spent_usd: spend / 1000000,
-    purchase_view: parseInt(row.conversion_purchase_views || "0"),
-    purchase_click: parseInt(row.conversion_purchase_clicks || "0"),
-    total_value_purchase: totalValue / 1000000,
-    currency: "USD"
-  };
-}
-function transformRowCommunity(row, lookups) {
-  const spend = Number(row.spend || 0);
-  const totalValue = Number(row.conversion_purchase_total_value || 0);
-  return {
-    campaign_name: lookups.campaigns[row.campaign_id] || null,
-    campaign_date: row.date,
-    community: row.community,
-    impressions: parseInt(row.impressions || "0"),
-    clicks: parseInt(row.clicks || "0"),
-    amount_spent_usd: spend / 1000000,
-    purchase_view: parseInt(row.conversion_purchase_views || "0"),
-    purchase_click: parseInt(row.conversion_purchase_clicks || "0"),
-    total_value_purchase: totalValue / 1000000,
-    currency: "USD"
-  };
-}
-function transformRowPlacement(row, lookups) {
-  const spend = Number(row.spend || 0);
-  const totalValue = Number(row.conversion_purchase_total_value || 0);
-  return {
-    campaign_name: lookups.campaigns[row.campaign_id] || null,
-    placement: row.placement || "",
-    campaign_date: row.date,
-    impressions: parseInt(row.impressions || "0"),
-    clicks: parseInt(row.clicks || "0"),
-    amount_spent_usd: spend / 1000000,
-    purchase_view: parseInt(row.conversion_purchase_views || "0"),
-    purchase_click: parseInt(row.conversion_purchase_clicks || "0"),
-    total_value_purchase: totalValue / 1000000,
-    currency: "USD"
-  };
-}
-// ============ SAVE FUNCTIONS ============
-async function saveAdGroupData(supabase, data, lookups) {
-  if (!data.length) {
-    console.log("No ad_group data to save");
-    return 0;
-  }
-  const rows = data.filter((r)=>r.date).map((r)=>transformRowAdGroup(r, lookups));
-  if (!rows.length) {
-    console.log("No valid ad_group rows");
-    return 0;
-  }
-  const { error } = await supabase.from("reddit_campaigns_ad_group").upsert(rows, {
-    onConflict: "campaign_name,ad_group_name,campaign_date"
-  });
-  if (error) {
-    console.error(`Ad group upsert failed: ${error.message}`);
-    throw error;
-  }
-  console.log(`Saved ${rows.length} ad_group rows`);
-  return rows.length;
-}
-async function saveCommunityData(supabase, data, lookups) {
-  if (!data.length) {
-    console.log("No community data to save");
-    return 0;
-  }
-  const rows = data.filter((r)=>r.date && r.community).map((r)=>transformRowCommunity(r, lookups));
-  if (!rows.length) {
-    console.log("No valid community rows");
-    return 0;
-  }
-  const { error } = await supabase.from("reddit_campaigns_community").upsert(rows, {
-    onConflict: "campaign_name,community,campaign_date"
-  });
-  if (error) {
-    console.error(`Community upsert failed: ${error.message}`);
-    throw error;
-  }
-  console.log(`Saved ${rows.length} community rows`);
-  return rows.length;
-}
-async function savePlacementData(supabase, data, lookups) {
-  if (!data.length) {
-    console.log("No placement data to save");
-    return 0;
-  }
-  const rows = data.filter((r)=>r.date && r.placement).map((r)=>transformRowPlacement(r, lookups));
-  if (!rows.length) {
-    console.log("No valid placement rows");
-    return 0;
-  }
-  const { error } = await supabase.from("reddit_campaigns_placement").upsert(rows, {
-    onConflict: "campaign_name,placement,campaign_date"
-  });
-  if (error) {
-    console.error(`Placement upsert failed: ${error.message}`);
-    throw error;
-  }
-  console.log(`Saved ${rows.length} placement rows`);
-  return rows.length;
-}
-// ============ DELETE FUNCTION ============
-async function deleteDataForDate(supabase, targetDate) {
-  let totalDeleted = 0;
-  for (const table of [
-    "reddit_campaigns_ad_group",
-    "reddit_campaigns_community",
-    "reddit_campaigns_placement"
-  ]){
-    const { data, error } = await supabase.from(table).delete().eq("campaign_date", targetDate).select("id");
-    if (error) {
-      console.error(`Error deleting from ${table}: ${error.message}`);
-    } else {
-      const count = data?.length || 0;
-      totalDeleted += count;
-      console.log(`Deleted ${count} rows from ${table} for ${targetDate}`);
-    }
-  }
-  return totalDeleted;
-}
-// ============ MAIN HANDLER ============
-serve(async (req)=>{
+Deno.serve(async (req)=>{
   if (req.method === "OPTIONS") {
     return new Response("ok", {
       headers: corsHeaders
     });
   }
+  const L = [];
+  const log = (msg)=>{
+    L.push(msg);
+    console.log(msg);
+  };
   try {
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-    // Authenticate caller
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(JSON.stringify({
-        error: "No auth header"
-      }), {
-        status: 401,
-        headers: {
-          ...corsHeaders,
-          "Content-Type": "application/json"
-        }
-      });
-    }
-    const { data: { user }, error: userError } = await supabase.auth.getUser(authHeader.replace("Bearer ", ""));
-    if (userError || !user) {
-      return new Response(JSON.stringify({
-        error: "Unauthorized"
-      }), {
-        status: 401,
-        headers: {
-          ...corsHeaders,
-          "Content-Type": "application/json"
-        }
-      });
-    }
-    // Get user profile -> agency_id
-    const { data: profile } = await supabase.from("user_profiles").select("agency_id").eq("id", user.id).single();
-    if (!profile?.agency_id) {
-      return new Response(JSON.stringify({
-        error: "No agency found"
-      }), {
-        status: 400,
-        headers: {
-          ...corsHeaders,
-          "Content-Type": "application/json"
-        }
-      });
-    }
-    // Get Reddit credentials from agency_platform_credentials
-    const { data: creds } = await supabase.from("agency_platform_credentials").select("id, agency_id, platform, oauth_refresh_token, platform_mcc_id, is_active").eq("agency_id", profile.agency_id).eq("platform", "reddit").eq("is_active", true).single();
-    if (!creds) {
-      return new Response(JSON.stringify({
-        error: "No Reddit credentials found"
-      }), {
-        status: 404,
-        headers: {
-          ...corsHeaders,
-          "Content-Type": "application/json"
-        }
-      });
-    }
-    const refreshToken = creds.oauth_refresh_token;
-    if (!refreshToken) {
-      return new Response(JSON.stringify({
-        error: "No refresh token found"
-      }), {
-        status: 400,
-        headers: {
-          ...corsHeaders,
-          "Content-Type": "application/json"
-        }
-      });
-    }
-    // Get Reddit account IDs from client_platform_accounts
-    const { data: accounts } = await supabase.from("client_platform_accounts").select("platform_customer_id").eq("platform", "reddit").eq("is_active", true);
-    if (!accounts || accounts.length === 0) {
-      return new Response(JSON.stringify({
-        error: "No active Reddit accounts"
-      }), {
-        status: 404,
-        headers: {
-          ...corsHeaders,
-          "Content-Type": "application/json"
-        }
-      });
-    }
-    // Parse request body for optional date overrides
-    let startDate;
-    let endDate;
-    let mode = "daily";
+    const SB_URL = Deno.env.get("SUPABASE_URL") || "";
+    const SB_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+    const REDDIT_CLIENT_ID = Deno.env.get("REDDIT_CLIENT_ID") || "";
+    const REDDIT_CLIENT_SECRET = Deno.env.get("REDDIT_CLIENT_SECRET") || "";
+    const API_BASE = "https://ads-api.reddit.com/api/v3";
+    const UA = "AgencyDashboard/1.0";
+    let body = {};
     try {
-      const body = await req.json();
-      if (body.start_date && body.end_date) {
-        startDate = body.start_date;
-        endDate = body.end_date;
-        mode = "date_range";
-      }
+      body = await req.json();
     } catch  {
-    // No body — use default daily mode
+      body = {};
     }
-    if (mode === "daily") {
+    const customerId = body.customer_id || null;
+    const mode = body.mode || "daily";
+    const daysBack = body.days_back || 5;
+    let dateFrom = body.date_from || "";
+    let dateTo = body.date_to || "";
+    if (!customerId) {
+      return jsonRes({
+        error: "customer_id required"
+      }, 400);
+    }
+    // ── Date range ──
+    if (mode === "backfill" && dateFrom && dateTo) {
+    // use provided
+    } else {
       const now = new Date();
-      const yesterday = new Date(now);
-      yesterday.setDate(now.getDate() - 1);
-      const dayBefore = new Date(now);
-      dayBefore.setDate(now.getDate() - 2);
-      startDate = dayBefore.toISOString().split("T")[0];
-      endDate = yesterday.toISOString().split("T")[0];
+      const from = new Date(now);
+      from.setDate(from.getDate() - daysBack);
+      const to = new Date(now);
+      to.setDate(to.getDate() - 1);
+      dateFrom = from.toISOString().split("T")[0];
+      dateTo = to.toISOString().split("T")[0];
     }
-    console.log("============================================================");
-    console.log("Reddit Ads API v3 -> Supabase");
-    console.log("============================================================");
-    console.log(`Mode: ${mode}`);
-    console.log(`Dates: ${startDate} to ${endDate}`);
-    console.log(`Accounts: ${accounts.map((a)=>a.platform_customer_id).join(", ")}`);
-    console.log("============================================================");
-    // Refresh access token
-    const accessToken = await refreshAccessToken(refreshToken);
-    const results = {};
-    for (const account of accounts){
-      const accountId = account.platform_customer_id;
-      console.log(`\nProcessing account: ${accountId}`);
-      results[accountId] = {
-        ad_group: 0,
-        community: 0,
-        placement: 0,
-        errors: []
+    log("=== REDDIT FULL SYNC ===");
+    log(`Customer: ${customerId} | Mode: ${mode}`);
+    log(`Dates: ${dateFrom} to ${dateTo}`);
+    // ── Look up credentials ──
+    const cpaRes = await fetch(SB_URL + "/rest/v1/client_platform_accounts?" + "platform_customer_id=eq." + customerId + "&platform=eq.reddit&is_active=eq.true" + "&select=agency_id", {
+      headers: {
+        apikey: SB_KEY,
+        Authorization: "Bearer " + SB_KEY
+      }
+    });
+    const cpaRows = await cpaRes.json();
+    if (!cpaRows || cpaRows.length === 0) {
+      log("ERROR: No client_platform_account for " + customerId);
+      return jsonRes({
+        error: "No account found",
+        log: L
+      }, 400);
+    }
+    const agencyId = cpaRows[0].agency_id;
+    const credRes = await fetch(SB_URL + "/rest/v1/agency_platform_credentials?" + "agency_id=eq." + agencyId + "&platform=eq.reddit&is_active=eq.true" + "&select=oauth_refresh_token", {
+      headers: {
+        apikey: SB_KEY,
+        Authorization: "Bearer " + SB_KEY
+      }
+    });
+    const credRows = await credRes.json();
+    if (!credRows || credRows.length === 0 || !credRows[0].oauth_refresh_token) {
+      log("ERROR: No Reddit credential for agency " + agencyId);
+      return jsonRes({
+        error: "No credential",
+        log: L
+      }, 400);
+    }
+    const refreshToken = credRows[0].oauth_refresh_token;
+    log("Credential found for agency " + agencyId);
+    // ── Refresh Reddit access token ──
+    const tokenRes = await fetch("https://www.reddit.com/api/v1/access_token", {
+      method: "POST",
+      headers: {
+        Authorization: "Basic " + btoa(`${REDDIT_CLIENT_ID}:${REDDIT_CLIENT_SECRET}`),
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": UA
+      },
+      body: `grant_type=refresh_token&refresh_token=${refreshToken}`
+    });
+    if (tokenRes.status !== 200) {
+      const txt = await tokenRes.text();
+      log("ERROR: Token refresh failed: " + txt);
+      return jsonRes({
+        error: "Token refresh failed",
+        log: L
+      }, 400);
+    }
+    const tokenData = await tokenRes.json();
+    const accessToken = tokenData.access_token;
+    log("Token OK");
+    // ── Report fields ──
+    const REPORT_FIELDS = [
+      "IMPRESSIONS",
+      "CLICKS",
+      "SPEND",
+      "CPC",
+      "CTR",
+      "ECPM",
+      "REACH",
+      "FREQUENCY",
+      "CONVERSION_PURCHASE_VIEWS",
+      "CONVERSION_PURCHASE_CLICKS",
+      "CONVERSION_PURCHASE_TOTAL_VALUE",
+      "CONVERSION_PURCHASE_ECPA",
+      "CONVERSION_LEAD_CLICKS",
+      "CONVERSION_LEAD_VIEWS",
+      "CONVERSION_SIGN_UP_CLICKS",
+      "CONVERSION_SIGN_UP_VIEWS",
+      "CONVERSION_PAGE_VISIT_CLICKS",
+      "CONVERSION_PAGE_VISIT_VIEWS",
+      "CONVERSION_ADD_TO_CART_CLICKS",
+      "CONVERSION_ADD_TO_CART_VIEWS",
+      "CONVERSION_ADD_TO_CART_TOTAL_VALUE",
+      "CONVERSION_ROAS",
+      "VIDEO_STARTED",
+      "VIDEO_VIEWABLE_IMPRESSIONS"
+    ];
+    // ── Breakdown configs ──
+    const BREAKDOWNS = {
+      campaign: [
+        "DATE",
+        "CAMPAIGN_ID",
+        "COUNTRY"
+      ],
+      ad_group: [
+        "DATE",
+        "CAMPAIGN_ID",
+        "AD_GROUP_ID"
+      ],
+      placement: [
+        "DATE",
+        "CAMPAIGN_ID",
+        "PLACEMENT"
+      ]
+    };
+    // ── Fetch report (POST, pagination via next_url) ──
+    async function fetchReport(dateStr, breakdowns) {
+      const baseUrl = `${API_BASE}/ad_accounts/${customerId}/reports`;
+      const hdrs = {
+        Authorization: `Bearer ${accessToken}`,
+        "User-Agent": UA,
+        "Content-Type": "application/json"
       };
-      // Build date list
-      const dates = [];
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      const current = new Date(start);
-      while(current <= end){
-        dates.push(current.toISOString().split("T")[0]);
-        current.setDate(current.getDate() + 1);
+      const reqBody = {
+        data: {
+          starts_at: `${dateStr}T00:00:00Z`,
+          ends_at: `${dateStr}T23:00:00Z`,
+          breakdowns,
+          fields: REPORT_FIELDS
+        }
+      };
+      const allRows = [];
+      let page = 1;
+      let url = baseUrl;
+      while(true){
+        log(`  POST page ${page}: breakdowns=${breakdowns.join(",")}`);
+        const res = await fetch(url, {
+          method: "POST",
+          headers: hdrs,
+          body: JSON.stringify(reqBody)
+        });
+        if (res.status !== 200) {
+          const txt = await res.text();
+          log(`  Report error ${res.status}: ${txt.substring(0, 300)}`);
+          break;
+        }
+        const json = await res.json();
+        const rows = json.data?.metrics || [];
+        allRows.push(...rows);
+        log(`  Page ${page}: ${rows.length} rows (total: ${allRows.length})`);
+        // Pagination: use next_url directly as the full URL for next request
+        const nextUrl = json.pagination?.next_url;
+        if (nextUrl) {
+          url = nextUrl;
+          page++;
+          continue;
+        }
+        break;
       }
-      // If daily mode, delete day-before-yesterday data first
-      if (mode === "daily") {
-        const dayBeforeStr = dates[0];
-        console.log(`Deleting old data for ${dayBeforeStr}...`);
-        await deleteDataForDate(supabase, dayBeforeStr);
+      return allRows;
+    }
+    // ── Build lookups (list endpoints with pagination) ──
+    async function buildLookups() {
+      const campaigns = {};
+      const adGroups = {};
+      let nextUrl = `${API_BASE}/ad_accounts/${customerId}/campaigns?page.size=500`;
+      while(nextUrl){
+        const res = await fetch(nextUrl, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "User-Agent": UA
+          }
+        });
+        if (res.status !== 200) {
+          log("  WARN: campaigns list " + res.status);
+          break;
+        }
+        const json = await res.json();
+        const items = json.data || [];
+        for (const c of items){
+          if (c.id && c.name) campaigns[c.id] = c.name;
+        }
+        nextUrl = json.pagination?.next_url || null;
       }
-      for (const dateStr of dates){
-        console.log(`\n--- Processing ${dateStr} ---`);
-        // AD_GROUP breakdown
-        try {
-          console.log("Fetching AD_GROUP data...");
-          const adGroupData = await fetchReport(accessToken, accountId, dateStr, dateStr, BREAKDOWNS_AD_GROUP);
-          if (adGroupData.length) {
-            const lookups = await buildLookups(accessToken, adGroupData);
-            const saved = await saveAdGroupData(supabase, adGroupData, lookups);
-            results[accountId].ad_group += saved;
-            console.log(`✓ Saved ${saved} ad_group rows`);
-          } else {
-            console.log("⚠ No ad_group data");
+      nextUrl = `${API_BASE}/ad_accounts/${customerId}/ad_groups?page.size=500`;
+      while(nextUrl){
+        const res = await fetch(nextUrl, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "User-Agent": UA
           }
-        } catch (e) {
-          console.error(`✗ AD_GROUP error: ${e.message}`);
-          results[accountId].errors.push(`AD_GROUP ${dateStr}: ${e.message}`);
+        });
+        if (res.status !== 200) {
+          log("  WARN: ad_groups list " + res.status);
+          break;
         }
-        // COMMUNITY breakdown
-        try {
-          console.log("Fetching COMMUNITY data...");
-          const communityData = await fetchReport(accessToken, accountId, dateStr, dateStr, BREAKDOWNS_COMMUNITY);
-          if (communityData.length) {
-            const lookups = await buildLookups(accessToken, communityData);
-            const saved = await saveCommunityData(supabase, communityData, lookups);
-            results[accountId].community += saved;
-            console.log(`✓ Saved ${saved} community rows`);
-          } else {
-            console.log("⚠ No community data");
-          }
-        } catch (e) {
-          console.error(`✗ COMMUNITY error: ${e.message}`);
-          results[accountId].errors.push(`COMMUNITY ${dateStr}: ${e.message}`);
+        const json = await res.json();
+        const items = json.data || [];
+        for (const ag of items){
+          if (ag.id && ag.name) adGroups[ag.id] = ag.name;
         }
-        // PLACEMENT breakdown
-        try {
-          console.log("Fetching PLACEMENT data...");
-          const placementData = await fetchReport(accessToken, accountId, dateStr, dateStr, BREAKDOWNS_PLACEMENT);
-          if (placementData.length) {
-            const lookups = await buildLookups(accessToken, placementData);
-            const saved = await savePlacementData(supabase, placementData, lookups);
-            results[accountId].placement += saved;
-            console.log(`✓ Saved ${saved} placement rows`);
-          } else {
-            console.log("⚠ No placement data");
-          }
-        } catch (e) {
-          console.error(`✗ PLACEMENT error: ${e.message}`);
-          results[accountId].errors.push(`PLACEMENT ${dateStr}: ${e.message}`);
+        nextUrl = json.pagination?.next_url || null;
+      }
+      log(`  Lookups: ${Object.keys(campaigns).length} campaigns, ${Object.keys(adGroups).length} ad groups`);
+      return {
+        campaigns,
+        adGroups
+      };
+    }
+    // ── Supabase upsert helper ──
+    async function su(table, data, conflict) {
+      if (data.length === 0) return 0;
+      const seen = new Set();
+      const deduped = data.filter((row)=>{
+        const key = conflict.split(",").map((k)=>row[k.trim()] || "").join("|");
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      let total = 0;
+      for(let i = 0; i < deduped.length; i += 400){
+        const chunk = deduped.slice(i, i + 400);
+        const res = await fetch(SB_URL + "/rest/v1/" + table + "?on_conflict=" + conflict, {
+          method: "POST",
+          headers: {
+            apikey: SB_KEY,
+            Authorization: "Bearer " + SB_KEY,
+            "Content-Type": "application/json",
+            Prefer: "resolution=merge-duplicates"
+          },
+          body: JSON.stringify(chunk)
+        });
+        if (!res.ok) {
+          const err = await res.text();
+          log(`  WARN upsert ${table}: ${err.substring(0, 200)}`);
+        } else {
+          total += chunk.length;
         }
+      }
+      return total;
+    }
+    // ── Metric helpers ──
+    function num(v) {
+      return Number(v || 0);
+    }
+    function microDiv(v) {
+      return Math.round(num(v) / 1000000 * 1000000) / 1000000;
+    }
+    function centDiv(v) {
+      return Math.round(num(v) / 100 * 100) / 100;
+    }
+    function baseMetrics(r) {
+      return {
+        impressions: num(r.impressions),
+        clicks: num(r.clicks),
+        spend: microDiv(r.spend),
+        cpc: microDiv(r.cpc),
+        ctr: num(r.ctr),
+        ecpm: microDiv(r.ecpm),
+        reach: num(r.reach),
+        frequency: num(r.frequency),
+        purchase_views: num(r.conversion_purchase_views),
+        purchase_clicks: num(r.conversion_purchase_clicks),
+        purchase_total_value: centDiv(r.conversion_purchase_total_value),
+        purchase_ecpa: microDiv(r.conversion_purchase_ecpa),
+        lead_clicks: num(r.conversion_lead_clicks),
+        lead_views: num(r.conversion_lead_views),
+        sign_up_clicks: num(r.conversion_sign_up_clicks),
+        sign_up_views: num(r.conversion_sign_up_views),
+        page_visit_clicks: num(r.conversion_page_visit_clicks),
+        page_visit_views: num(r.conversion_page_visit_views),
+        add_to_cart_clicks: num(r.conversion_add_to_cart_clicks),
+        add_to_cart_views: num(r.conversion_add_to_cart_views),
+        add_to_cart_total_value: centDiv(r.conversion_add_to_cart_total_value),
+        conversion_roas: num(r.conversion_roas),
+        video_started: num(r.video_started),
+        video_viewable_impressions: num(r.video_viewable_impressions),
+        currency: "USD",
+        updated_at: new Date().toISOString()
+      };
+    }
+    // ── Build date list ──
+    const dates = [];
+    const startD = new Date(dateFrom);
+    const endD = new Date(dateTo);
+    const cur = new Date(startD);
+    while(cur <= endD){
+      dates.push(cur.toISOString().split("T")[0]);
+      cur.setDate(cur.getDate() + 1);
+    }
+    log(`Processing ${dates.length} date(s)`);
+    // ── Build lookups once ──
+    const lookups = await buildLookups();
+    let totalRows = 0;
+    for (const dateStr of dates){
+      log(`\n--- ${dateStr} ---`);
+      // A. Campaign + Country
+      try {
+        log("A. Campaign+Country...");
+        const rows = await fetchReport(dateStr, BREAKDOWNS.campaign);
+        const data = rows.filter((r)=>r.date).map((r)=>({
+            customer_id: customerId,
+            campaign_id: String(r.campaign_id || ""),
+            campaign_name: lookups.campaigns[r.campaign_id] || null,
+            country: r.country || "ALL",
+            report_date: r.date,
+            ...baseMetrics(r)
+          }));
+        const n = await su("reddit_campaign_daily", data, "customer_id,campaign_id,report_date,country");
+        log(`  OK: ${n} campaign rows`);
+        totalRows += n;
+      } catch (e) {
+        log(`  ERR campaign: ${e.message}`);
+      }
+      // B. Ad Group
+      try {
+        log("B. Ad Group...");
+        const rows = await fetchReport(dateStr, BREAKDOWNS.ad_group);
+        const data = rows.filter((r)=>r.date).map((r)=>({
+            customer_id: customerId,
+            campaign_id: String(r.campaign_id || ""),
+            campaign_name: lookups.campaigns[r.campaign_id] || null,
+            ad_group_id: String(r.ad_group_id || ""),
+            ad_group_name: lookups.adGroups[r.ad_group_id] || null,
+            report_date: r.date,
+            ...baseMetrics(r)
+          }));
+        const n = await su("reddit_adgroup_daily", data, "customer_id,campaign_id,ad_group_id,report_date");
+        log(`  OK: ${n} ad_group rows`);
+        totalRows += n;
+      } catch (e) {
+        log(`  ERR ad_group: ${e.message}`);
+      }
+      // C. Placement
+      try {
+        log("C. Placement...");
+        const rows = await fetchReport(dateStr, BREAKDOWNS.placement);
+        const data = rows.filter((r)=>r.date && r.placement).map((r)=>({
+            customer_id: customerId,
+            campaign_id: String(r.campaign_id || ""),
+            campaign_name: lookups.campaigns[r.campaign_id] || null,
+            placement: r.placement || "",
+            report_date: r.date,
+            ...baseMetrics(r)
+          }));
+        const n = await su("reddit_placement_daily", data, "customer_id,campaign_id,placement,report_date");
+        log(`  OK: ${n} placement rows`);
+        totalRows += n;
+      } catch (e) {
+        log(`  ERR placement: ${e.message}`);
       }
     }
-    console.log("\n============================================================");
-    console.log("DONE");
-    console.log(JSON.stringify(results, null, 2));
-    console.log("============================================================");
-    return new Response(JSON.stringify({
+    log(`\n=== DONE === Total: ${totalRows}`);
+    return jsonRes({
       success: true,
-      results
-    }), {
-      headers: {
-        ...corsHeaders,
-        "Content-Type": "application/json"
-      }
+      total_rows: totalRows,
+      log: L
     });
-  } catch (e) {
-    console.error(`Fatal error: ${e.message}`);
-    return new Response(JSON.stringify({
+  } catch (err) {
+    log("FATAL: " + (err.message || String(err)));
+    return jsonRes({
       success: false,
-      error: e.message
-    }), {
-      status: 500,
-      headers: {
-        ...corsHeaders,
-        "Content-Type": "application/json"
-      }
-    });
+      error: err.message,
+      log: L
+    }, 500);
   }
 });
