@@ -74,6 +74,7 @@ export function SettingsPage() {
   const [savingAgency, setSavingAgency] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [connectingReddit, setConnectingReddit] = useState(false);
+  const [connectingFacebook, setConnectingFacebook] = useState(false);
   const [connectingGA4, setConnectingGA4] = useState(false);
   const [disconnectingGa4CredId, setDisconnectingGa4CredId] = useState(null);
   const [reassigningGa4PropertyId, setReassigningGa4PropertyId] = useState(null);
@@ -422,6 +423,44 @@ export function SettingsPage() {
     }
   };
 
+  const handleConnectFacebook = async () => {
+    if (!effectiveAgencyId) {
+      showNotification(isSuperAdmin ? 'Select an agency first.' : 'No agency assigned. Contact your admin.');
+      return;
+    }
+    setConnectingFacebook(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        showNotification('Please sign in first.');
+        return;
+      }
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/fb-oauth-connect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({
+          action: 'get_auth_url',
+          redirect_uri: redirectUri,
+          agency_id: effectiveAgencyId,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.error || data?.message || `Failed to start Meta login (${res.status})`);
+      }
+      const url = data?.auth_url || data?.url;
+      if (url) {
+        window.location.href = url;
+      } else {
+        throw new Error(data?.error || 'No auth URL returned');
+      }
+    } catch (err) {
+      showNotification(err?.message || 'Failed to connect Facebook / Meta');
+    } finally {
+      setConnectingFacebook(false);
+    }
+  };
+
   const handleConnectReddit = async () => {
     if (!effectiveAgencyId) {
       showNotification(isSuperAdmin ? 'Select an agency first.' : 'No agency assigned. Contact your admin.');
@@ -457,12 +496,18 @@ export function SettingsPage() {
   };
 
   const handleDisconnect = async (platform) => {
-    setDisconnecting(platform);
+      setDisconnecting(platform);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
-      const fn = platform === 'reddit' ? 'reddit-oauth-connect' : platform === 'ga4' ? 'ga4-oauth-connect' : 'oauth-connect';
-      const body = (platform === 'reddit' || platform === 'ga4')
+      const fn = platform === 'reddit'
+        ? 'reddit-oauth-connect'
+        : platform === 'ga4'
+          ? 'ga4-oauth-connect'
+          : platform === 'facebook'
+            ? 'fb-oauth-connect'
+            : 'oauth-connect';
+      const body = (platform === 'reddit' || platform === 'ga4' || platform === 'facebook')
         ? { action: 'disconnect', agency_id: effectiveAgencyId }
         : { action: 'disconnect', platform, agency_id: effectiveAgencyId };
       const { data, error } = await supabase.functions.invoke(fn, {
@@ -585,6 +630,10 @@ export function SettingsPage() {
   };
 
   const syncFacebookWithChunking = useCallback(async (customerId, dateFrom, dateTo, onProgress) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+      return { success: false, totalRows: 0, errorMessage: 'Please sign in first.' };
+    }
     const chunks = [];
     const start = new Date(dateFrom);
     const end = new Date(dateTo);
@@ -600,19 +649,26 @@ export function SettingsPage() {
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];
       if (onProgress) onProgress({ current: i + 1, total: chunks.length, dateFrom: chunk.start, dateTo: chunk.end, status: `Syncing ${chunk.start} → ${chunk.end} (${i + 1}/${chunks.length})`, rows: totalRows });
-      const { data, error } = await supabase.functions.invoke('fb-full-sync', {
-        body: {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/fb-full-sync`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
           customer_id: customerId,
           mode: 'backfill',
           date_from: chunk.start,
           date_to: chunk.end,
-        },
+        }),
       });
-      if (error) {
-        await insertSyncLog(customerId, { dateFrom: chunk.start, dateTo: chunk.end, status: 'error', rowsSynced: 0, errorMessage: error.message }, 'facebook');
-        continue;
+      const text = await res.text();
+      if (!res.ok) {
+        const errSnippet = text.length > 1200 ? `${text.slice(0, 1200)}…` : text;
+        await insertSyncLog(customerId, { dateFrom: chunk.start, dateTo: chunk.end, status: 'error', rowsSynced: 0, errorMessage: errSnippet }, 'facebook');
+        return { success: false, totalRows, errorMessage: errSnippet };
       }
-      const chunkRows = data?.total_rows ?? 0;
+      const chunkRows = parseInt((text.match(/Total:\s*(\d+)/) || [])[1], 10) || 0;
       totalRows += chunkRows;
       await insertSyncLog(customerId, { dateFrom: chunk.start, dateTo: chunk.end, status: 'success', rowsSynced: chunkRows }, 'facebook');
     }
@@ -664,8 +720,13 @@ export function SettingsPage() {
         account.platform_customer_id, dateFrom, dateTo,
         (p) => setSyncProgress({ accountId: account.id, accountName: account.account_name, ...p })
       );
-      showNotification(`Synced ${account.account_name}: ${result.totalRows} rows`);
-      await supabase.from('client_platform_accounts').update({ last_sync_at: new Date().toISOString(), sync_status: 'success' }).eq('id', account.id);
+      if (!result.success) {
+        showNotification(result.errorMessage || 'Facebook sync failed');
+        await supabase.from('client_platform_accounts').update({ last_sync_at: new Date().toISOString(), sync_status: 'error' }).eq('id', account.id);
+      } else {
+        showNotification(`Synced ${account.account_name}: ${result.totalRows} rows`);
+        await supabase.from('client_platform_accounts').update({ last_sync_at: new Date().toISOString(), sync_status: 'success' }).eq('id', account.id);
+      }
       await fetchAccounts();
       await fetchSyncLogs(account.platform_customer_id, 'facebook');
     } catch (err) {
@@ -737,6 +798,12 @@ export function SettingsPage() {
           account.platform_customer_id, dateFrom, dateTo,
           (p) => setSyncProgress({ accountId: account.id, accountName: account.account_name, ...p })
         );
+        if (!result.success) {
+          showNotification(`${account.account_name || account.platform_customer_id}: ${result.errorMessage || 'sync failed'}`);
+          await supabase.from('client_platform_accounts').update({ last_sync_at: new Date().toISOString(), sync_status: 'error' }).eq('id', account.id);
+          await fetchSyncLogs(account.platform_customer_id, 'facebook');
+          continue;
+        }
         totalAll += result.totalRows;
         await supabase.from('client_platform_accounts').update({ last_sync_at: new Date().toISOString(), sync_status: 'success' }).eq('id', account.id);
         await fetchSyncLogs(account.platform_customer_id, 'facebook');
@@ -830,6 +897,11 @@ export function SettingsPage() {
   const gadsCred = credentials.find((c) => c.platform === 'google_ads' && c.is_active);
   const redditCred = credentials.find((c) => c.platform === 'reddit' && c.is_active);
   const facebookCred = credentials.find((c) => c.platform === 'facebook' && c.is_active);
+  const facebookNeedsReconnect = !!(
+    facebookCred &&
+    (facebookCred.last_sync_status === 'error' ||
+      (facebookCred.last_error && /session|expired|access token|oauth|190/i.test(String(facebookCred.last_error))))
+  );
   const ga4Credentials = credentials.filter((c) => c.platform === 'ga4');
   const ga4ActiveCredentials = ga4Credentials.filter((c) => c.is_active);
   const hasGa4Connected = ga4ActiveCredentials.length > 0;
@@ -1117,11 +1189,34 @@ export function SettingsPage() {
               <h3>Facebook / Meta Ads</h3>
               <div className="settings-form-group" style={{ marginBottom: 24 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                     <span style={{ fontWeight: 600 }}>Facebook / Meta Ads</span>
-                    <span className={`badge ${facebookCred ? 'badge-green' : 'badge-gray'}`}>{facebookCred ? 'Connected' : 'Not connected'}</span>
+                    {facebookNeedsReconnect ? (
+                      <span className="badge badge-yellow" title={facebookCred?.last_error || 'Token or session issue'}>Reconnect required</span>
+                    ) : (
+                      <span className={`badge ${facebookCred ? 'badge-green' : 'badge-gray'}`}>{facebookCred ? 'Connected' : 'Not connected'}</span>
+                    )}
                   </div>
+                  {facebookCred ? (
+                    <>
+                      <button type="button" className="btn btn-outline btn-sm" onClick={() => handleDisconnect('facebook')} disabled={disconnecting === 'facebook'}>
+                        {disconnecting === 'facebook' ? 'Disconnecting…' : 'Disconnect'}
+                      </button>
+                      <button type="button" className="btn btn-primary btn-sm" onClick={handleConnectFacebook} disabled={connectingFacebook}>
+                        {connectingFacebook ? 'Opening Meta…' : facebookNeedsReconnect ? 'Reconnect with Meta' : 'Refresh Meta login'}
+                      </button>
+                    </>
+                  ) : (
+                    <button type="button" className="btn btn-primary" onClick={handleConnectFacebook} disabled={connectingFacebook}>
+                      {connectingFacebook ? 'Opening Meta…' : 'Connect Facebook / Meta'}
+                    </button>
+                  )}
                 </div>
+                <p className="help-text" style={{ margin: '8px 0 0', maxWidth: 720 }}>
+                  After Meta login, sync uses a long-lived token. If login fails with a redirect error, add this exact URL under Meta app → Facebook Login → Settings → Valid OAuth Redirect URIs:
+                  {' '}
+                  <code style={{ fontSize: 12, wordBreak: 'break-all' }}>{redirectUri}</code>
+                </p>
               </div>
               <AccountsTable
                 platform="facebook"

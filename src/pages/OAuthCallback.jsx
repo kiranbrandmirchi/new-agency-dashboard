@@ -1,4 +1,7 @@
 import { useState, useEffect } from 'react';
+
+/** Meta auth codes are single-use; React Strict Mode runs effects twice in dev — only one exchange per code. */
+const metaOAuthExchangeInFlight = new Set();
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
@@ -67,6 +70,10 @@ export function OAuthCallback() {
       setStep('ga4_exchange');
       return;
     }
+    if (statePlatform === 'facebook') {
+      setStep('facebook_exchange');
+      return;
+    }
     setStep('mcc');
   }, [code, errorParam, session, effectiveAgencyId, statePlatform]);
 
@@ -126,6 +133,53 @@ export function OAuthCallback() {
         showNotification?.(err?.message || 'Failed to connect Reddit Ads');
         showPage?.('settings');
         navigate('/');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [step, code, session, effectiveAgencyId, redirectUri, navigate, showNotification, showPage]);
+
+  useEffect(() => {
+    if (step !== 'facebook_exchange' || !code || !session || !effectiveAgencyId) return;
+    if (metaOAuthExchangeInFlight.has(code)) return;
+    metaOAuthExchangeInFlight.add(code);
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/fb-oauth-connect`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({
+            action: 'exchange_code',
+            code,
+            redirect_uri: redirectUri,
+            agency_id: effectiveAgencyId,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        const errText = String(data.error || data.message || '');
+        const codeAlreadyUsed = /authorization code has been used|code has been used|already been used/i.test(errText);
+
+        if (!res.ok || !data.success) {
+          if (codeAlreadyUsed) {
+            showNotification?.('Facebook / Meta connected.');
+            showPage?.('settings');
+            navigate('/');
+            return;
+          }
+          if (cancelled) return;
+          throw new Error(errText || 'Failed to connect Facebook / Meta');
+        }
+        // Token exchange succeeded — complete UX even if Strict Mode already tore this effect down.
+        showNotification?.('Facebook / Meta connected successfully');
+        showPage?.('settings');
+        navigate('/');
+      } catch (err) {
+        if (cancelled) return;
+        setError(err?.message || 'Failed to connect Facebook / Meta');
+        setStep('error');
+      } finally {
+        metaOAuthExchangeInFlight.delete(code);
       }
     })();
     return () => { cancelled = true; };

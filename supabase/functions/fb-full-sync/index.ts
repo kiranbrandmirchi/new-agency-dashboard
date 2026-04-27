@@ -80,37 +80,66 @@ Deno.serve(async (req)=>{
       log("ERROR: No credential for credential_id " + credentialId);
       return textResponse(L.join("\n"), 400);
     }
-    let accessToken = agencyCreds[0].oauth_refresh_token;
+    const storedToken = agencyCreds[0].oauth_refresh_token;
     const credDbId = agencyCreds[0].id;
+    let accessToken = storedToken;
     log("Credential found");
-    // --- Refresh long-lived token ---
+    async function patchCredential(body) {
+      await fetch(SB_URL + "/rest/v1/agency_platform_credentials?id=eq." + credDbId, {
+        method: "PATCH",
+        headers: {
+          "apikey": SB_KEY,
+          "Authorization": "Bearer " + SB_KEY,
+          "Content-Type": "application/json",
+          "Prefer": "return=minimal"
+        },
+        body: JSON.stringify(body)
+      });
+    }
+    // --- Exchange / extend long-lived token (fb_exchange_token). Expired or invalid tokens return error, not access_token. ---
     try {
-      const tokenRes = await fetch(FB_BASE + "/oauth/access_token?" + "grant_type=fb_exchange_token" + "&client_id=" + FB_APP_ID + "&client_secret=" + FB_APP_SECRET + "&fb_exchange_token=" + accessToken);
-      const tokenData = await tokenRes.json();
-      if (tokenData.access_token && tokenData.access_token !== accessToken) {
-        accessToken = tokenData.access_token;
-        // Update in DB
-        await fetch(SB_URL + "/rest/v1/agency_platform_credentials?id=eq." + credDbId, {
-          method: "PATCH",
-          headers: {
-            "apikey": SB_KEY,
-            "Authorization": "Bearer " + SB_KEY,
-            "Content-Type": "application/json",
-            "Prefer": "return=minimal"
-          },
-          body: JSON.stringify({
-            oauth_refresh_token: accessToken,
-            last_sync_at: new Date().toISOString()
-          })
+      const tokenParams = new URLSearchParams({
+        grant_type: "fb_exchange_token",
+        client_id: FB_APP_ID,
+        client_secret: FB_APP_SECRET,
+        fb_exchange_token: storedToken
+      });
+      const tokenRes = await fetch(FB_BASE + "/oauth/access_token?" + tokenParams.toString());
+      const tokenData = await tokenRes.json().catch(() => ({}));
+      const tokenErrMsg = tokenData.error ? typeof tokenData.error === "string" ? tokenData.error : tokenData.error.message || JSON.stringify(tokenData.error) : !tokenRes.ok ? "HTTP " + tokenRes.status : !tokenData.access_token ? "No access_token in exchange response" : null;
+      if (tokenErrMsg || !tokenData.access_token) {
+        const detail = (tokenErrMsg || "Token exchange failed") + (tokenData && Object.keys(tokenData).length ? " | " + JSON.stringify(tokenData).substring(0, 350) : "");
+        log("ERROR: Facebook token invalid or expired: " + detail.substring(0, 500));
+        log("ACTION: Reconnect Facebook / Meta in Settings (OAuth session expired).");
+        await patchCredential({
+          last_sync_at: new Date().toISOString(),
+          last_sync_status: "error",
+          last_error: detail.substring(0, 2000)
         });
-        log("Token refreshed and saved");
+        return textResponse(L.join("\n"), 401);
+      }
+      accessToken = tokenData.access_token;
+      if (accessToken !== storedToken) {
+        await patchCredential({
+          oauth_refresh_token: accessToken,
+          last_sync_at: new Date().toISOString(),
+          last_error: null,
+          last_sync_status: null
+        });
+        log("Long-lived token refreshed and saved");
       } else {
-        log("Token still valid (no refresh needed)");
+        log("Long-lived token exchange OK (same token returned)");
       }
     } catch (e) {
-      log("Token refresh warning: " + e.message + " (using existing)");
+      log("ERROR: Token exchange request failed: " + (e.message || String(e)));
+      await patchCredential({
+        last_sync_at: new Date().toISOString(),
+        last_sync_status: "error",
+        last_error: (e.message || String(e)).substring(0, 2000)
+      });
+      return textResponse(L.join("\n"), 500);
     }
-    log("Token OK");
+    log("Access token ready for Graph API");
     // --- Supabase upsert helper (same as gads) ---
     async function su(table, data, conflict) {
       if (data.length === 0) return 0;
@@ -144,6 +173,7 @@ Deno.serve(async (req)=>{
       return total;
     }
     // --- FB Insights fetch helper with pagination ---
+    let graphOAuthError = null;
     async function fetchInsights(level, dateStr, breakdowns) {
       const allRows = [];
       const fields = [
@@ -180,6 +210,14 @@ Deno.serve(async (req)=>{
         if (!res.ok) {
           const txt = await res.text();
           log("  Insights error " + res.status + ": " + txt.substring(0, 300));
+          try {
+            const j = JSON.parse(txt);
+            const err = j?.error;
+            if (err && Number(err.code) === 190) {
+              graphOAuthError = err.message || "Facebook access token is invalid or expired.";
+            }
+          } catch  {
+          /* non-JSON body */ }
           break;
         }
         const json = await res.json();
@@ -256,12 +294,13 @@ Deno.serve(async (req)=>{
       d.setUTCDate(d.getUTCDate() + 1);
     }
     let totalRows = 0;
-    for (const dateStr of dates){
+    dateLoop: for (const dateStr of dates){
       log("\n--- " + dateStr + " ---");
       // A. Campaign level
       try {
         log("A. Campaigns...");
         const rows = await fetchInsights("campaign", dateStr);
+        if (graphOAuthError) break dateLoop;
         const data = rows.map((r)=>({
             customer_id: customerId,
             campaign_id: r.campaign_id || "",
@@ -280,6 +319,7 @@ Deno.serve(async (req)=>{
       try {
         log("B. Ad Sets...");
         const rows = await fetchInsights("adset", dateStr);
+        if (graphOAuthError) break dateLoop;
         const data = rows.map((r)=>({
             customer_id: customerId,
             campaign_id: r.campaign_id || "",
@@ -300,6 +340,7 @@ Deno.serve(async (req)=>{
       try {
         log("C. Ads...");
         const rows = await fetchInsights("ad", dateStr);
+        if (graphOAuthError) break dateLoop;
         const data = rows.map((r)=>({
             customer_id: customerId,
             campaign_id: r.campaign_id || "",
@@ -322,6 +363,7 @@ Deno.serve(async (req)=>{
       try {
         log("D. Placements...");
         const rows = await fetchInsights("campaign", dateStr, "publisher_platform,platform_position");
+        if (graphOAuthError) break dateLoop;
         const data = rows.map((r)=>({
             customer_id: customerId,
             campaign_id: r.campaign_id || "",
@@ -339,19 +381,21 @@ Deno.serve(async (req)=>{
         log("   ERR placements: " + e.message);
       }
     }
-    // Update last_sync_at on the credential
-    await fetch(SB_URL + "/rest/v1/agency_platform_credentials?id=eq." + credDbId, {
-      method: "PATCH",
-      headers: {
-        "apikey": SB_KEY,
-        "Authorization": "Bearer " + SB_KEY,
-        "Content-Type": "application/json",
-        "Prefer": "return=minimal"
-      },
-      body: JSON.stringify({
+    if (graphOAuthError) {
+      log("\n=== FAILED (OAuth / session) ===");
+      log(graphOAuthError);
+      await patchCredential({
         last_sync_at: new Date().toISOString(),
-        last_sync_status: "success"
-      })
+        last_sync_status: "error",
+        last_error: String(graphOAuthError).substring(0, 2000)
+      });
+      return textResponse(L.join("\n"), 401);
+    }
+    // Update last_sync_at on the credential
+    await patchCredential({
+      last_sync_at: new Date().toISOString(),
+      last_sync_status: "success",
+      last_error: null
     });
     log("\n=== DONE === Total: " + totalRows);
     return textResponse(L.join("\n"), 200);
