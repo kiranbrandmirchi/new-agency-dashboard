@@ -32,12 +32,11 @@ function num(v: unknown) {
   return Number.isFinite(n) ? n : 0;
 }
 
+/** Fields aligned with tiktok_campaign_daily / tiktok_placement_daily (no cpc/ctr columns; UI derives those). */
 function pickMetrics(m: Record<string, unknown>) {
   const spend = num(m.spend);
   const impressions = Math.round(num(m.impressions));
   const clicks = Math.round(num(m.clicks));
-  const cpc = num(m.cpc);
-  const ctr = num(m.ctr);
   const reach = Math.round(num(m.reach));
   const purchaseClicks = Math.round(
     num(m.complete_payment) || num(m.conversion) || num(m.result) || num(m.app_install),
@@ -49,8 +48,6 @@ function pickMetrics(m: Record<string, unknown>) {
     impressions,
     clicks,
     spend,
-    cpc,
-    ctr,
     reach,
     purchase_views: 0,
     purchase_clicks: purchaseClicks,
@@ -244,11 +241,43 @@ Deno.serve(async (req) => {
       return all;
     }
 
+    /** campaign_id is not a valid dimension alongside adgroup_id; map adgroup → campaign via Ad Group API. */
+    async function fetchAdgroupCampaignMap(advertiserId: string, token: string): Promise<Record<string, string>> {
+      const map: Record<string, string> = {};
+      let page = 1;
+      const pageSize = 1000;
+      while (true) {
+        const qs = new URLSearchParams();
+        qs.set("advertiser_id", advertiserId);
+        qs.set("page", String(page));
+        qs.set("page_size", String(pageSize));
+        const url = `${TT_API}/adgroup/get/?${qs.toString()}`;
+        const res = await fetch(url, { headers: { "Access-Token": token } });
+        const j = await res.json().catch(() => ({}));
+        if (j.code !== 0) {
+          log(`adgroup/get page ${page}: ${j.message || res.status} ${JSON.stringify(j).slice(0, 200)}`);
+          break;
+        }
+        const list = (j.data?.list || []) as Record<string, unknown>[];
+        for (const row of list) {
+          const aid = String(row.adgroup_id ?? "");
+          const cid = String(row.campaign_id ?? "");
+          if (aid && cid) map[aid] = cid;
+        }
+        const pi = j.data?.page_info || {};
+        const totalPage = num(pi.total_page) || 1;
+        if (page >= totalPage) break;
+        page++;
+        await new Promise((r) => setTimeout(r, 150));
+      }
+      return map;
+    }
+
+    // One time dimension + one ID dimension per TikTok integrated-report rules.
     const metricsAdgroup = [
       "campaign_name",
       "adgroup_name",
       "spend",
-      "billing_currency",
       "cpc",
       "cpm",
       "impressions",
@@ -257,8 +286,6 @@ Deno.serve(async (req) => {
       "reach",
       "frequency",
       "conversion",
-      "complete_payment",
-      "complete_payment_value",
     ];
 
     const dates: string[] = [];
@@ -270,7 +297,9 @@ Deno.serve(async (req) => {
     }
 
     let totalRows = 0;
-    const dimsAg = ["stat_time_day", "campaign_id", "adgroup_id"];
+    const dimsAg = ["stat_time_day", "adgroup_id"];
+    const adgroupToCampaign = await fetchAdgroupCampaignMap(customerId, accessToken);
+    log(`adgroup→campaign map: ${Object.keys(adgroupToCampaign).length} ad groups`);
 
     for (const day of dates) {
       log(`--- ${day} ---`);
@@ -289,8 +318,8 @@ Deno.serve(async (req) => {
           const dims = (raw.dimensions || {}) as Record<string, unknown>;
           const met = (raw.metrics || raw) as Record<string, unknown>;
           const statDay = String(dims.stat_time_day || dims.stat_time_day_utc || day).slice(0, 10);
-          const campId = String(dims.campaign_id ?? "");
           const agId = String(dims.adgroup_id ?? "");
+          const campId = String(dims.campaign_id ?? adgroupToCampaign[agId] ?? "");
           const pm = pickMetrics(met);
           campaignRows.push({
             customer_id: customerId,
@@ -326,8 +355,6 @@ Deno.serve(async (req) => {
             "ctr",
             "reach",
             "conversion",
-            "complete_payment",
-            "complete_payment_value",
           ],
         });
         const placementRows: Record<string, unknown>[] = [];
