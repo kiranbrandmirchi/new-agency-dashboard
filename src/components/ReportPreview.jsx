@@ -58,6 +58,7 @@ export function ReportPreview({ report, accounts, sections, uploads, platformDat
   const gadsAccs = pd.filter((a) => a.platform === 'google_ads');
   const fbAccs = pd.filter((a) => a.platform === 'facebook');
   const redditAccs = pd.filter((a) => a.platform === 'reddit');
+  const tiktokAccs = pd.filter((a) => a.platform === 'tiktok');
   const ga4Accs = pd.filter((a) => a.platform === 'ga4');
   const ghlAccs = pd.filter((a) => a.platform === 'ghl');
 
@@ -246,6 +247,43 @@ export function ReportPreview({ report, accounts, sections, uploads, platformDat
                 <KpiBox label="Reach" value={fI(acc.kpis?.reach)} accent="#FF6231" />
                 <KpiBox label="Conversions" value={fI(acc.kpis?.conversions)} mom={acc.momChange?.conversions} accent="#FF6231" />
                 <KpiBox label="Purch. Value" value={fU(acc.kpis?.purchase_value)} accent="#FF6231" />
+              </div>
+              {acc.campaigns?.length > 0 && (
+                <DataTable columns={[
+                  { label: 'Campaign', val: (r) => r.campaign_name },
+                  { label: 'Spend', val: (r) => r.cost, fmt: fU, align: 'r' },
+                  { label: 'Impr.', val: (r) => r.impressions, fmt: fI, align: 'r' },
+                  { label: 'Clicks', val: (r) => r.clicks, fmt: fI, align: 'r' },
+                  { label: 'CTR', val: (r) => r.ctr, fmt: fP, align: 'r' },
+                  { label: 'Reach', val: (r) => r.reach, fmt: fI, align: 'r' },
+                  { label: 'Conv.', val: (r) => r.conversions, fmt: fI, align: 'r' },
+                  { label: 'Purch. Value', val: (r) => r.purchase_value, fmt: fU, align: 'r' },
+                ]} rows={acc.campaigns} />
+              )}
+              <SectionNotes sections={sections} prefix={`account_${acc.accountId}`} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tiktokAccs.length > 0 && (
+        <div className="rp-section">
+          <div className="rp-section-header">
+            <div className="rp-section-icon" style={{ background: 'linear-gradient(135deg,#25F4EE,#FE2C55)' }}>T</div>
+            <h2>TikTok Ads</h2>
+          </div>
+          {tiktokAccs.map((acc) => (
+            <div key={acc.accountId}>
+              <div className="rp-sub-header">{acc.label}</div>
+              <div className="rp-kpi-row">
+                <KpiBox label="Spend" value={fU(acc.kpis?.cost)} mom={acc.momChange?.cost} accent="#010101" />
+                <KpiBox label="Impressions" value={fI(acc.kpis?.impressions)} mom={acc.momChange?.impressions} accent="#25F4EE" />
+                <KpiBox label="Clicks" value={fI(acc.kpis?.clicks)} mom={acc.momChange?.clicks} accent="#FE2C55" />
+                <KpiBox label="CTR" value={fP(acc.kpis?.ctr)} accent="#25F4EE" />
+                <KpiBox label="CPC" value={fU(acc.kpis?.cpc)} accent="#010101" />
+                <KpiBox label="Reach" value={fI(acc.kpis?.reach)} accent="#25F4EE" />
+                <KpiBox label="Conversions" value={fI(acc.kpis?.conversions)} mom={acc.momChange?.conversions} accent="#FE2C55" />
+                <KpiBox label="Purch. Value" value={fU(acc.kpis?.purchase_value)} accent="#FE2C55" />
               </div>
               {acc.campaigns?.length > 0 && (
                 <DataTable columns={[

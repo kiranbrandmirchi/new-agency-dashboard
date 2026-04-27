@@ -243,6 +243,53 @@ export function useMonthlyReport(reportId) {
             momChange: { cost: momChange(curCost, pCost), clicks: momChange(curClicks, pClicks), impressions: momChange(curImpr, pImpr), conversions: momChange(curConv, pConv) },
           };
 
+        } else if (platform === 'tiktok') {
+          const [campRes, prevRes] = await Promise.all([
+            supabase.from('tiktok_campaign_daily').select('*').eq('customer_id', cid).gte('report_date', currentFrom).lte('report_date', currentTo),
+            supabase.from('tiktok_campaign_daily').select('*').eq('customer_id', cid).gte('report_date', prevFrom).lte('report_date', prevTo),
+          ]);
+
+          const campaignMap = new Map();
+          (campRes.data || []).forEach((r) => {
+            const key = r.campaign_id;
+            if (!campaignMap.has(key)) campaignMap.set(key, { campaign_name: r.campaign_name, cost: 0, clicks: 0, impressions: 0, reach: 0, conversions: 0, purchase_value: 0 });
+            const a = campaignMap.get(key);
+            a.cost += num(r.spend); a.clicks += num(r.clicks); a.impressions += num(r.impressions); a.reach += num(r.reach);
+            a.conversions += num(r.purchase_clicks || 0); a.purchase_value += num(r.purchase_total_value || 0);
+          });
+          const campaigns = [...campaignMap.values()].map((c) => ({
+            ...c, cpc: c.clicks ? c.cost / c.clicks : 0, ctr: c.impressions ? (c.clicks / c.impressions) * 100 : 0,
+          })).sort((a, b) => b.cost - a.cost);
+
+          const dailyByDate = new Map();
+          (campRes.data || []).forEach((r) => {
+            const d = r.report_date;
+            if (!dailyByDate.has(d)) dailyByDate.set(d, { date: d, cost: 0 });
+            dailyByDate.get(d).cost += num(r.spend);
+          });
+          const daily = [...dailyByDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+
+          const curCost = campaigns.reduce((s, c) => s + c.cost, 0);
+          const curClicks = campaigns.reduce((s, c) => s + c.clicks, 0);
+          const curImpr = campaigns.reduce((s, c) => s + c.impressions, 0);
+          const curReach = campaigns.reduce((s, c) => s + c.reach, 0);
+          const curConv = campaigns.reduce((s, c) => s + c.conversions, 0);
+          const curPurchVal = campaigns.reduce((s, c) => s + c.purchase_value, 0);
+
+          let pCost = 0, pClicks = 0, pImpr = 0, pConv = 0;
+          (prevRes.data || []).forEach((r) => { pCost += num(r.spend); pClicks += num(r.clicks); pImpr += num(r.impressions); pConv += num(r.purchase_clicks || 0); });
+
+          totalCost += curCost; totalClicks += curClicks; totalImpressions += curImpr; totalConversions += curConv;
+          prevCost += pCost; prevClicks += pClicks; prevImpressions += pImpr; prevConversions += pConv;
+
+          dataByAccount[acc.id] = {
+            accountId: acc.id, label, platform,
+            campaigns, keywords: [], daily,
+            kpis: { cost: curCost, clicks: curClicks, impressions: curImpr, reach: curReach, conversions: curConv, purchase_value: curPurchVal, cpc: curClicks ? curCost / curClicks : 0, ctr: curImpr ? (curClicks / curImpr) * 100 : 0 },
+            prevKpis: { cost: pCost, clicks: pClicks, impressions: pImpr, conversions: pConv },
+            momChange: { cost: momChange(curCost, pCost), clicks: momChange(curClicks, pClicks), impressions: momChange(curImpr, pImpr), conversions: momChange(curConv, pConv) },
+          };
+
         } else if (platform === 'ga4') {
           const [ga4Res, ga4PrevRes] = await Promise.all([
             supabase.from('ga4_raw').select('*').eq('customer_id', cid).gte('report_date', currentFrom).lte('report_date', currentTo),

@@ -16,6 +16,8 @@ export function OAuthCallback() {
   const { showNotification, showPage } = useApp();
 
   const code = searchParams.get('code');
+  /** TikTok Marketing API redirects with `auth_code`; other providers use `code`. */
+  const authCode = searchParams.get('auth_code') || code;
   const stateParam = searchParams.get('state');
   const errorParam = searchParams.get('error');
 
@@ -48,7 +50,7 @@ export function OAuthCallback() {
       setStep('error');
       return;
     }
-    if (!code) {
+    if (!authCode) {
       setError('No authorization code received.');
       setStep('error');
       return;
@@ -66,6 +68,10 @@ export function OAuthCallback() {
       setStep('reddit_exchange');
       return;
     }
+    if (statePlatform === 'tiktok') {
+      setStep('tiktok_exchange');
+      return;
+    }
     if (statePlatform === 'ga4') {
       setStep('ga4_exchange');
       return;
@@ -75,7 +81,7 @@ export function OAuthCallback() {
       return;
     }
     setStep('mcc');
-  }, [code, errorParam, session, effectiveAgencyId, statePlatform]);
+  }, [authCode, errorParam, session, effectiveAgencyId, statePlatform]);
 
   useEffect(() => {
     if (step !== 'ga4_exchange' || !code || !session || !effectiveAgencyId) return;
@@ -109,14 +115,14 @@ export function OAuthCallback() {
   }, [step, code, session, effectiveAgencyId, redirectUri, navigate, showNotification, showPage]);
 
   useEffect(() => {
-    if (step !== 'reddit_exchange' || !code || !session || !effectiveAgencyId) return;
+    if (step !== 'reddit_exchange' || !authCode || !session || !effectiveAgencyId) return;
     let cancelled = false;
     (async () => {
       try {
         const { data, error: fnError } = await supabase.functions.invoke('reddit-oauth-connect', {
           body: {
             action: 'exchange_code',
-            code,
+            code: authCode,
             redirect_uri: redirectUri,
             agency_id: effectiveAgencyId,
           },
@@ -136,7 +142,42 @@ export function OAuthCallback() {
       }
     })();
     return () => { cancelled = true; };
-  }, [step, code, session, effectiveAgencyId, redirectUri, navigate, showNotification, showPage]);
+  }, [step, authCode, session, effectiveAgencyId, redirectUri, navigate, showNotification, showPage]);
+
+  useEffect(() => {
+    if (step !== 'tiktok_exchange' || !authCode || !session || !effectiveAgencyId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error: fnError } = await supabase.functions.invoke('tiktok-oauth-connect', {
+          body: {
+            action: 'exchange_code',
+            auth_code: authCode,
+            code: authCode,
+            redirect_uri: redirectUri,
+            agency_id: effectiveAgencyId,
+          },
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+        if (cancelled) return;
+        if (data?.error || fnError) {
+          const msg = [data?.error, data?.detail, data?.hint].filter(Boolean).join(' — ') || fnError?.message || 'Failed';
+          throw new Error(msg);
+        }
+        showNotification?.(
+          [data?.message, data?.token_note].filter(Boolean).join(' ') || 'TikTok Ads connected successfully',
+        );
+        showPage?.('settings');
+        navigate('/');
+      } catch (err) {
+        if (cancelled) return;
+        showNotification?.(err?.message || 'Failed to connect TikTok Ads');
+        showPage?.('settings');
+        navigate('/');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [step, authCode, session, effectiveAgencyId, redirectUri, navigate, showNotification, showPage]);
 
   useEffect(() => {
     if (step !== 'facebook_exchange' || !code || !session || !effectiveAgencyId) return;

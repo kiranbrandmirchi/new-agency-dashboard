@@ -83,10 +83,12 @@ export function useCombinedDashboardData() {
   const [rawGads, setRawGads] = useState([]);
   const [rawFb, setRawFb] = useState([]);
   const [rawReddit, setRawReddit] = useState([]);
+  const [rawTiktok, setRawTiktok] = useState([]);
   const [rawGa4, setRawGa4] = useState([]);
   const [rawGadsCompare, setRawGadsCompare] = useState([]);
   const [rawFbCompare, setRawFbCompare] = useState([]);
   const [rawRedditCompare, setRawRedditCompare] = useState([]);
+  const [rawTiktokCompare, setRawTiktokCompare] = useState([]);
   const [rawGa4Compare, setRawGa4Compare] = useState([]);
   const [accountMap, setAccountMap] = useState(new Map());
   /** GA4 properties linked in CPA (for empty-state copy when summary rows are missing). */
@@ -106,7 +108,7 @@ export function useCombinedDashboardData() {
     try {
       const { from, to } = computeDateRange(filters.datePreset, filters.dateFrom, filters.dateTo);
       if (!from || !to) {
-        setRawGadsCompare([]); setRawFbCompare([]); setRawRedditCompare([]); setRawGa4Compare([]);
+        setRawGadsCompare([]); setRawFbCompare([]); setRawRedditCompare([]); setRawTiktokCompare([]); setRawGa4Compare([]);
         setLoading(false);
         return;
       }
@@ -138,8 +140,8 @@ export function useCombinedDashboardData() {
       if (!canViewAllCustomers) {
         const allowedIds = (allowedClientAccounts || []).map((a) => a.platform_customer_id);
         if (allowedIds.length === 0) {
-          setRawGads([]); setRawFb([]); setRawReddit([]); setRawGa4([]);
-          setRawGadsCompare([]); setRawFbCompare([]); setRawRedditCompare([]); setRawGa4Compare([]);
+          setRawGads([]); setRawFb([]); setRawReddit([]); setRawTiktok([]); setRawGa4([]);
+          setRawGadsCompare([]); setRawFbCompare([]); setRawRedditCompare([]); setRawTiktokCompare([]); setRawGa4Compare([]);
           setLinkedGa4CpaCount(0);
           setLoading(false);
           return;
@@ -168,7 +170,7 @@ export function useCombinedDashboardData() {
       setAccountMap(accMap);
       setLinkedGa4CpaCount(accounts.filter((a) => a.platform === 'ga4').length);
 
-      const byPlatform = { google_ads: [], facebook: [], reddit: [], ga4: [] };
+      const byPlatform = { google_ads: [], facebook: [], reddit: [], tiktok: [], ga4: [] };
       const ga4IdSet = new Set();
       accounts.forEach((a) => {
         if (!byPlatform[a.platform]) return;
@@ -269,6 +271,29 @@ export function useCombinedDashboardData() {
         }
       }
 
+      // TikTok Ads — same grain as Reddit (`tiktok_campaign_daily`)
+      let tiktokData = [];
+      let tiktokCmp = [];
+      if (byPlatform.tiktok.length > 0) {
+        if (filters.compareOn && cmpFrom && cmpTo) {
+          const [p, c] = await Promise.all([
+            supabase.from('tiktok_campaign_daily').select('*')
+              .in('customer_id', byPlatform.tiktok)
+              .gte('report_date', from).lte('report_date', to),
+            supabase.from('tiktok_campaign_daily').select('*')
+              .in('customer_id', byPlatform.tiktok)
+              .gte('report_date', cmpFrom).lte('report_date', cmpTo),
+          ]);
+          tiktokData = p.data || [];
+          tiktokCmp = c.data || [];
+        } else {
+          const { data } = await supabase.from('tiktok_campaign_daily').select('*')
+            .in('customer_id', byPlatform.tiktok)
+            .gte('report_date', from).lte('report_date', to);
+          tiktokData = data || [];
+        }
+      }
+
       // GA4 — same store as Basic GA4 report: `ga4_daily_summary` (sync / ga4_summary_report source)
       let ga4Data = [];
       let ga4Cmp = [];
@@ -286,10 +311,12 @@ export function useCombinedDashboardData() {
       setRawGads(gadsData);
       setRawFb(fbData);
       setRawReddit(redditData);
+      setRawTiktok(tiktokData);
       setRawGa4(ga4Data);
       setRawGadsCompare(filters.compareOn && cmpFrom && cmpTo ? gadsCmp : []);
       setRawFbCompare(filters.compareOn && cmpFrom && cmpTo ? fbCmp : []);
       setRawRedditCompare(filters.compareOn && cmpFrom && cmpTo ? redditCmp : []);
+      setRawTiktokCompare(filters.compareOn && cmpFrom && cmpTo ? tiktokCmp : []);
       setRawGa4Compare(filters.compareOn && cmpFrom && cmpTo ? ga4Cmp : []);
     } catch (err) {
       console.error('[Dashboard] error:', err);
@@ -300,8 +327,8 @@ export function useCombinedDashboardData() {
   }, [canViewAllCustomers, allowedClientAccounts, scopeAgencyId, selectedClientId, filters.datePreset, filters.dateFrom, filters.dateTo, filters.compareOn, filters.compareFrom, filters.compareTo]);
 
   useEffect(() => {
-    setRawGads([]); setRawFb([]); setRawReddit([]); setRawGa4([]);
-    setRawGadsCompare([]); setRawFbCompare([]); setRawRedditCompare([]); setRawGa4Compare([]);
+    setRawGads([]); setRawFb([]); setRawReddit([]); setRawTiktok([]); setRawGa4([]);
+    setRawGadsCompare([]); setRawFbCompare([]); setRawRedditCompare([]); setRawTiktokCompare([]); setRawGa4Compare([]);
     setAccountMap(new Map());
     setLinkedGa4CpaCount(0);
   }, [scopeAgencyId, allowedClientAccounts]);
@@ -332,7 +359,7 @@ export function useCombinedDashboardData() {
         a.cost += num(r.spend); a.clicks += num(r.clicks); a.impressions += num(r.impressions); a.reach += num(r.reach);
         a.purchase_count += num(r.purchase_count); a.purchase_value += num(r.purchase_value); a.lead_count += num(r.lead_count);
         a.conversions += num(r.purchase_count) + num(r.lead_count);
-      } else if (platform === 'reddit') {
+      } else if (platform === 'reddit' || platform === 'tiktok') {
         a.cost += num(r.spend); a.clicks += num(r.clicks); a.impressions += num(r.impressions); a.reach += num(r.reach);
         a.conversions += num(r.purchase_clicks || 0);
       } else if (platform === 'ga4') {
@@ -383,7 +410,7 @@ export function useCombinedDashboardData() {
       } else if (platform === 'facebook') {
         a.cost += num(r.spend); a.clicks += num(r.clicks); a.impressions += num(r.impressions);
         a.conversions += num(r.purchase_count) + num(r.lead_count);
-      } else if (platform === 'reddit') {
+      } else if (platform === 'reddit' || platform === 'tiktok') {
         a.cost += num(r.spend); a.clicks += num(r.clicks); a.impressions += num(r.impressions); a.conversions += num(r.purchase_clicks || 0);
       }
     });
@@ -405,11 +432,13 @@ export function useCombinedDashboardData() {
   const gadsAccounts = useMemo(() => aggregateByAccount(rawGads, 'google_ads'), [rawGads, accountMap]);
   const fbAccounts = useMemo(() => aggregateByAccount(rawFb, 'facebook'), [rawFb, accountMap]);
   const redditAccounts = useMemo(() => aggregateByAccount(rawReddit, 'reddit'), [rawReddit, accountMap]);
+  const tiktokAccounts = useMemo(() => aggregateByAccount(rawTiktok, 'tiktok'), [rawTiktok, accountMap]);
   const ga4Accounts = useMemo(() => aggregateByAccount(rawGa4, 'ga4'), [rawGa4, accountMap]);
 
   const gadsAccountsCompare = useMemo(() => aggregateByAccount(rawGadsCompare, 'google_ads'), [rawGadsCompare, accountMap]);
   const fbAccountsCompare = useMemo(() => aggregateByAccount(rawFbCompare, 'facebook'), [rawFbCompare, accountMap]);
   const redditAccountsCompare = useMemo(() => aggregateByAccount(rawRedditCompare, 'reddit'), [rawRedditCompare, accountMap]);
+  const tiktokAccountsCompare = useMemo(() => aggregateByAccount(rawTiktokCompare, 'tiktok'), [rawTiktokCompare, accountMap]);
   const ga4AccountsCompare = useMemo(() => aggregateByAccount(rawGa4Compare, 'ga4'), [rawGa4Compare, accountMap]);
 
   /** Roll GA4 properties up to client (same date range) for dashboard overview. */
@@ -471,6 +500,7 @@ export function useCombinedDashboardData() {
   const gadsCampaigns = useMemo(() => aggregateCampaigns(rawGads, 'google_ads'), [rawGads]);
   const fbCampaigns = useMemo(() => aggregateCampaigns(rawFb, 'facebook'), [rawFb]);
   const redditCampaigns = useMemo(() => aggregateCampaigns(rawReddit, 'reddit'), [rawReddit]);
+  const tiktokCampaigns = useMemo(() => aggregateCampaigns(rawTiktok, 'tiktok'), [rawTiktok]);
 
   // Overall KPIs: ad metrics vs GA4 (avoid mixing conversions for CPA / labels)
   const summaryKpis = useMemo(() => {
@@ -482,7 +512,7 @@ export function useCombinedDashboardData() {
     const addAd = (accs) => accs.forEach((a) => {
       k.cost += a.cost; k.clicks += a.clicks; k.impressions += a.impressions; k.ad_conversions += a.conversions;
     });
-    addAd(gadsAccounts); addAd(fbAccounts); addAd(redditAccounts);
+    addAd(gadsAccounts); addAd(fbAccounts); addAd(redditAccounts); addAd(tiktokAccounts);
     ga4Accounts.forEach((a) => {
       k.sessions += a.sessions; k.total_users += a.total_users; k.page_views += a.page_views; k.ga4_conversions += a.conversions;
     });
@@ -490,9 +520,9 @@ export function useCombinedDashboardData() {
     k.cpc = k.clicks ? k.cost / k.clicks : 0;
     k.cpa = k.ad_conversions ? k.cost / k.ad_conversions : 0;
     return k;
-  }, [gadsAccounts, fbAccounts, redditAccounts, ga4Accounts]);
+  }, [gadsAccounts, fbAccounts, redditAccounts, tiktokAccounts, ga4Accounts]);
 
-  const hasData = rawGads.length > 0 || rawFb.length > 0 || rawReddit.length > 0 || rawGa4.length > 0;
+  const hasData = rawGads.length > 0 || rawFb.length > 0 || rawReddit.length > 0 || rawTiktok.length > 0 || rawGa4.length > 0;
 
   const compareRangeResolved = useMemo(() => {
     const dr = computeDateRange(filters.datePreset, filters.dateFrom, filters.dateTo);
@@ -515,9 +545,9 @@ export function useCombinedDashboardData() {
 
   return {
     filters, updateFilter, batchUpdateFilters, fetchData, loading, error, summaryKpis, accountMap, hasData,
-    gadsAccounts, fbAccounts, redditAccounts, ga4Accounts, ga4ByClient, linkedGa4CpaCount,
-    gadsAccountsCompare, fbAccountsCompare, redditAccountsCompare, ga4AccountsCompare,
-    gadsCampaigns, fbCampaigns, redditCampaigns,
+    gadsAccounts, fbAccounts, redditAccounts, tiktokAccounts, ga4Accounts, ga4ByClient, linkedGa4CpaCount,
+    gadsAccountsCompare, fbAccountsCompare, redditAccountsCompare, tiktokAccountsCompare, ga4AccountsCompare,
+    gadsCampaigns, fbCampaigns, redditCampaigns, tiktokCampaigns,
     primaryRangeLabel, compareRangeLabel,
   };
 }

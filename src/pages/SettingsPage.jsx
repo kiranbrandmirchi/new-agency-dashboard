@@ -12,6 +12,7 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const BASE_SETTINGS_SECTIONS = [
   { id: 'google_ads', label: 'Google Ads' },
   { id: 'reddit_ads', label: 'Reddit Ads' },
+  { id: 'tiktok_ads', label: 'TikTok Ads' },
   { id: 'facebook_ads', label: 'Facebook / Meta Ads' },
   { id: 'ga4', label: 'GA4 / Web Analytics' },
   { id: 'platforms', label: 'GHL' },
@@ -31,6 +32,46 @@ function statusBadge(status) {
   if (status === 'success' || status === 'synced') return 'badge-green';
   if (status === 'error' || status === 'failed') return 'badge-red';
   return 'badge-gray';
+}
+
+/**
+ * Parse pasted TikTok callback: auth_code and the redirect_uri TikTok used (required for token exchange).
+ * @returns {{ authCode: string, callbackRedirectUri: string | null }}
+ */
+function parseTiktokPasteInput(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return { authCode: '', callbackRedirectUri: null };
+  if (/^https?:\/\//i.test(s)) {
+    try {
+      const u = new URL(s);
+      const authCode = (u.searchParams.get('auth_code') || u.searchParams.get('code') || '').trim();
+      let callbackRedirectUri;
+      if (u.pathname === '/' || u.pathname === '') {
+        callbackRedirectUri = u.origin;
+      } else {
+        callbackRedirectUri = `${u.origin}${u.pathname.replace(/\/+$/, '')}`;
+      }
+      return { authCode, callbackRedirectUri };
+    } catch {
+      return { authCode: '', callbackRedirectUri: null };
+    }
+  }
+  return { authCode: s, callbackRedirectUri: null };
+}
+
+/** Supabase functions.invoke often sets `error` on 4xx while the JSON body is still in `data`. */
+function formatTiktokEdgeError(data, error) {
+  const parts = [];
+  if (data && typeof data === 'object') {
+    if (data.error) parts.push(String(data.error));
+    if (data.detail) parts.push(String(data.detail));
+    if (data.message && String(data.message) !== String(data.error)) parts.push(String(data.message));
+    if (data.hint) parts.push(String(data.hint));
+    if (data.data_keys) parts.push(`(response fields: ${data.data_keys})`);
+  }
+  if (parts.length) return [...new Set(parts)].join(' — ');
+  if (error?.message) return error.message;
+  return 'Request failed';
 }
 
 export function SettingsPage() {
@@ -60,6 +101,9 @@ export function SettingsPage() {
   const [redditDatePreset, setRedditDatePreset] = useState('last7');
   const [redditCustomFrom, setRedditCustomFrom] = useState('');
   const [redditCustomTo, setRedditCustomTo] = useState('');
+  const [tiktokDatePreset, setTiktokDatePreset] = useState('last7');
+  const [tiktokCustomFrom, setTiktokCustomFrom] = useState('');
+  const [tiktokCustomTo, setTiktokCustomTo] = useState('');
   const [facebookDatePreset, setFacebookDatePreset] = useState('last7');
   const [facebookCustomFrom, setFacebookCustomFrom] = useState('');
   const [facebookCustomTo, setFacebookCustomTo] = useState('');
@@ -74,6 +118,10 @@ export function SettingsPage() {
   const [savingAgency, setSavingAgency] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [connectingReddit, setConnectingReddit] = useState(false);
+  const [connectingTiktok, setConnectingTiktok] = useState(false);
+  const [tiktokPasteInput, setTiktokPasteInput] = useState('');
+  const [tiktokPastingCode, setTiktokPastingCode] = useState(false);
+  const [tiktokExchangeError, setTiktokExchangeError] = useState('');
   const [connectingFacebook, setConnectingFacebook] = useState(false);
   const [connectingGA4, setConnectingGA4] = useState(false);
   const [disconnectingGa4CredId, setDisconnectingGa4CredId] = useState(null);
@@ -101,6 +149,14 @@ export function SettingsPage() {
     }
     return getDateRangeFromPreset(redditDatePreset) || getDateRangeFromPreset('last7');
   }, [redditDatePreset, redditCustomFrom, redditCustomTo]);
+
+  const getTiktokDateRange = useCallback(() => {
+    if (tiktokDatePreset === 'custom') {
+      if (tiktokCustomFrom && tiktokCustomTo) return { dateFrom: tiktokCustomFrom, dateTo: tiktokCustomTo };
+      return getDateRangeFromPreset('last7');
+    }
+    return getDateRangeFromPreset(tiktokDatePreset) || getDateRangeFromPreset('last7');
+  }, [tiktokDatePreset, tiktokCustomFrom, tiktokCustomTo]);
 
   const getFacebookDateRange = useCallback(() => {
     if (facebookDatePreset === 'custom') {
@@ -208,10 +264,12 @@ export function SettingsPage() {
   useEffect(() => {
     const gads = accounts.filter((a) => a.is_active && a.platform === 'google_ads').map((a) => a.platform_customer_id);
     const reddit = accounts.filter((a) => a.is_active && a.platform === 'reddit').map((a) => a.platform_customer_id);
+    const tiktok = accounts.filter((a) => a.is_active && a.platform === 'tiktok').map((a) => a.platform_customer_id);
     const facebook = accounts.filter((a) => a.is_active && a.platform === 'facebook').map((a) => a.platform_customer_id);
     const ga4 = accounts.filter((a) => a.is_active && a.platform === 'ga4').map((a) => a.platform_customer_id);
     if (gads.length) fetchLastDayPerAccount('google_ads', gads);
     if (reddit.length) fetchLastDayPerAccount('reddit', reddit);
+    if (tiktok.length) fetchLastDayPerAccount('tiktok', tiktok);
     if (facebook.length) fetchLastDayPerAccount('facebook', facebook);
     if (ga4.length) fetchLastDayPerAccount('ga4', ga4);
   }, [accounts, effectiveAgencyId, fetchLastDayPerAccount]);
@@ -283,6 +341,41 @@ export function SettingsPage() {
       const chunkRows = data?.total_rows ?? 0;
       totalRows += chunkRows;
       await insertSyncLog(customerId, { dateFrom: chunk.start, dateTo: chunk.end, status: 'success', rowsSynced: chunkRows }, 'reddit');
+    }
+    return { success: true, totalRows };
+  }, [insertSyncLog]);
+
+  const syncTiktokWithChunking = useCallback(async (customerId, dateFrom, dateTo, onProgress) => {
+    const chunks = [];
+    const start = new Date(dateFrom);
+    const end = new Date(dateTo);
+    const cur = new Date(start);
+    while (cur <= end) {
+      const chunkEnd = new Date(cur);
+      chunkEnd.setDate(chunkEnd.getDate() + 2);
+      if (chunkEnd > end) chunkEnd.setTime(end.getTime());
+      chunks.push({ start: cur.toISOString().split('T')[0], end: chunkEnd.toISOString().split('T')[0] });
+      cur.setDate(chunkEnd.getDate() + 1);
+    }
+    let totalRows = 0;
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      if (onProgress) onProgress({ current: i + 1, total: chunks.length, dateFrom: chunk.start, dateTo: chunk.end, status: `Syncing ${chunk.start} → ${chunk.end} (${i + 1}/${chunks.length})`, rows: totalRows });
+      const { data, error } = await supabase.functions.invoke('tiktok-full-sync', {
+        body: {
+          customer_id: customerId,
+          mode: 'backfill',
+          date_from: chunk.start,
+          date_to: chunk.end,
+        },
+      });
+      if (error) {
+        await insertSyncLog(customerId, { dateFrom: chunk.start, dateTo: chunk.end, status: 'error', rowsSynced: 0, errorMessage: error.message }, 'tiktok');
+        continue;
+      }
+      const chunkRows = data?.total_rows ?? 0;
+      totalRows += chunkRows;
+      await insertSyncLog(customerId, { dateFrom: chunk.start, dateTo: chunk.end, status: 'success', rowsSynced: chunkRows }, 'tiktok');
     }
     return { success: true, totalRows };
   }, [insertSyncLog]);
@@ -495,6 +588,97 @@ export function SettingsPage() {
     }
   };
 
+  const handleConnectTiktok = async () => {
+    if (!effectiveAgencyId) {
+      showNotification(isSuperAdmin ? 'Select an agency first.' : 'No agency assigned. Contact your admin.');
+      return;
+    }
+    setConnectingTiktok(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        showNotification('Please sign in first.');
+        return;
+      }
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/tiktok-oauth-connect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({
+          action: 'get_auth_url',
+          redirect_uri: redirectUri,
+          agency_id: effectiveAgencyId,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.error || data?.message || `Failed to connect TikTok (${res.status})`);
+      }
+      const url = data?.url || data?.auth_url;
+      if (url) {
+        window.location.href = url;
+      } else {
+        throw new Error(data?.error || 'No auth URL returned');
+      }
+    } catch (err) {
+      showNotification(err?.message || 'Failed to connect TikTok Ads');
+    } finally {
+      setConnectingTiktok(false);
+    }
+  };
+
+  const handleTiktokPasteExchange = async () => {
+    const { authCode, callbackRedirectUri } = parseTiktokPasteInput(tiktokPasteInput);
+    if (!authCode) {
+      const msg = 'Paste the full TikTok redirect URL (with auth_code in the query) or paste the auth_code only. If the code came from another domain, paste the full URL so redirect_uri matches TikTok.';
+      setTiktokExchangeError(msg);
+      showNotification(msg);
+      return;
+    }
+    if (!effectiveAgencyId) {
+      showNotification(isSuperAdmin ? 'Select an agency first.' : 'No agency assigned. Contact your admin.');
+      return;
+    }
+    setTiktokPastingCode(true);
+    setTiktokExchangeError('');
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        showNotification('Please sign in first.');
+        return;
+      }
+      const redirectForToken = callbackRedirectUri || redirectUri;
+      const { data, error } = await supabase.functions.invoke('tiktok-oauth-connect', {
+        body: {
+          action: 'exchange_code',
+          auth_code: authCode,
+          code: authCode,
+          redirect_uri: redirectForToken,
+          agency_id: effectiveAgencyId,
+        },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (data?.error || error) {
+        const msg = formatTiktokEdgeError(data, error);
+        setTiktokExchangeError(msg);
+        showNotification(msg);
+        return;
+      }
+      showNotification(
+        [data?.message, data?.token_note].filter(Boolean).join(' ') || 'TikTok connected.',
+      );
+      setTiktokPasteInput('');
+      setTiktokExchangeError('');
+      await fetchCredentials();
+      await fetchAccounts();
+    } catch (err) {
+      const msg = err?.message || 'Failed to exchange TikTok code (codes are single-use; start Connect again if it was already used).';
+      setTiktokExchangeError(msg);
+      showNotification(msg);
+    } finally {
+      setTiktokPastingCode(false);
+    }
+  };
+
   const handleDisconnect = async (platform) => {
       setDisconnecting(platform);
     try {
@@ -502,12 +686,14 @@ export function SettingsPage() {
       if (!session) return;
       const fn = platform === 'reddit'
         ? 'reddit-oauth-connect'
-        : platform === 'ga4'
-          ? 'ga4-oauth-connect'
-          : platform === 'facebook'
-            ? 'fb-oauth-connect'
-            : 'oauth-connect';
-      const body = (platform === 'reddit' || platform === 'ga4' || platform === 'facebook')
+        : platform === 'tiktok'
+          ? 'tiktok-oauth-connect'
+          : platform === 'ga4'
+            ? 'ga4-oauth-connect'
+            : platform === 'facebook'
+              ? 'fb-oauth-connect'
+              : 'oauth-connect';
+      const body = (platform === 'reddit' || platform === 'tiktok' || platform === 'ga4' || platform === 'facebook')
         ? { action: 'disconnect', agency_id: effectiveAgencyId }
         : { action: 'disconnect', platform, agency_id: effectiveAgencyId };
       const { data, error } = await supabase.functions.invoke(fn, {
@@ -623,6 +809,27 @@ export function SettingsPage() {
       await fetchSyncLogs(account.platform_customer_id, 'reddit');
     } catch (err) {
       showNotification(err?.message || 'Reddit sync failed');
+    } finally {
+      setSyncingAccount(null);
+      setSyncProgress(null);
+    }
+  };
+
+  const handleSyncTiktokAccount = async (account) => {
+    setSyncingAccount(account.id);
+    setSyncProgress({ accountId: account.id, status: 'Starting...' });
+    try {
+      const { dateFrom, dateTo } = getTiktokDateRange();
+      const result = await syncTiktokWithChunking(
+        account.platform_customer_id, dateFrom, dateTo,
+        (p) => setSyncProgress({ accountId: account.id, accountName: account.account_name, ...p })
+      );
+      showNotification(`Synced ${account.account_name}: ${result.totalRows} rows`);
+      await supabase.from('client_platform_accounts').update({ last_sync_at: new Date().toISOString(), sync_status: 'success' }).eq('id', account.id);
+      await fetchAccounts();
+      await fetchSyncLogs(account.platform_customer_id, 'tiktok');
+    } catch (err) {
+      showNotification(err?.message || 'TikTok sync failed');
     } finally {
       setSyncingAccount(null);
       setSyncProgress(null);
@@ -845,6 +1052,33 @@ export function SettingsPage() {
     }
   };
 
+  const handleSyncAllTiktok = async () => {
+    const tiktokAccounts = accounts.filter((a) => a.is_active && a.platform === 'tiktok');
+    if (!tiktokAccounts.length) { showNotification('No active TikTok accounts.'); return; }
+    setSyncingAll(true);
+    const { dateFrom, dateTo } = getTiktokDateRange();
+    let totalAll = 0;
+    try {
+      for (const account of tiktokAccounts) {
+        setSyncProgress({ accountId: account.id, accountName: account.account_name, status: 'Starting...' });
+        const result = await syncTiktokWithChunking(
+          account.platform_customer_id, dateFrom, dateTo,
+          (p) => setSyncProgress({ accountId: account.id, accountName: account.account_name, ...p })
+        );
+        totalAll += result.totalRows;
+        await supabase.from('client_platform_accounts').update({ last_sync_at: new Date().toISOString(), sync_status: 'success' }).eq('id', account.id);
+        await fetchSyncLogs(account.platform_customer_id, 'tiktok');
+      }
+      showNotification(`TikTok sync complete: ${totalAll} total rows`);
+      await fetchAccounts();
+    } catch (err) {
+      showNotification(err?.message || 'Sync failed');
+    } finally {
+      setSyncingAll(false);
+      setSyncProgress(null);
+    }
+  };
+
   const handleSaveAgency = async () => {
     if (!activeAgency?.id) return;
     setSavingAgency(true);
@@ -896,6 +1130,7 @@ export function SettingsPage() {
 
   const gadsCred = credentials.find((c) => c.platform === 'google_ads' && c.is_active);
   const redditCred = credentials.find((c) => c.platform === 'reddit' && c.is_active);
+  const tiktokCred = credentials.find((c) => c.platform === 'tiktok' && c.is_active);
   const facebookCred = credentials.find((c) => c.platform === 'facebook' && c.is_active);
   const facebookNeedsReconnect = !!(
     facebookCred &&
@@ -907,10 +1142,11 @@ export function SettingsPage() {
   const hasGa4Connected = ga4ActiveCredentials.length > 0;
   const activeGadsAccounts = accounts.filter((a) => a.is_active && a.platform === 'google_ads');
   const activeRedditAccounts = accounts.filter((a) => a.is_active && a.platform === 'reddit');
+  const activeTiktokAccounts = accounts.filter((a) => a.is_active && a.platform === 'tiktok');
   const activeFacebookAccounts = accounts.filter((a) => a.is_active && a.platform === 'facebook');
   const activeGa4Accounts = accounts.filter((a) => a.is_active && a.platform === 'ga4');
 
-  const platformLabels = { google_ads: 'Google Ads', reddit: 'Reddit', facebook: 'Facebook / Meta', ga4: 'GA4 / Web Analytics' };
+  const platformLabels = { google_ads: 'Google Ads', reddit: 'Reddit', tiktok: 'TikTok Ads', facebook: 'Facebook / Meta', ga4: 'GA4 / Web Analytics' };
   const ga4CredentialSelectOptions = ga4ActiveCredentials.map((c) => ({
     id: c.id,
     label: c.credential_label || c.google_email || 'Google account',
@@ -932,7 +1168,7 @@ export function SettingsPage() {
     ga4CredentialSavingAccountId,
   }) => {
     const presets = DATE_PRESETS;
-    const getRange = platform === 'reddit' ? getRedditDateRange : platform === 'facebook' ? getFacebookDateRange : platform === 'ga4' ? getGA4DateRange : getEffectiveDateRange;
+    const getRange = platform === 'reddit' ? getRedditDateRange : platform === 'tiktok' ? getTiktokDateRange : platform === 'facebook' ? getFacebookDateRange : platform === 'ga4' ? getGA4DateRange : getEffectiveDateRange;
     const label = platformLabels[platform] || platform;
     const colCount = platform === 'google_ads' ? 9 : platform === 'ga4' ? 9 : 8;
     return (
@@ -1180,6 +1416,89 @@ export function SettingsPage() {
                 customTo={redditCustomTo}
                 setCustomFrom={setRedditCustomFrom}
                 setCustomTo={setRedditCustomTo}
+              />
+            </div>
+          )}
+
+          {activeSettingsSection === 'tiktok_ads' && (
+            <div className="settings-section">
+              <h3>TikTok Ads</h3>
+              <div className="settings-form-group" style={{ marginBottom: 24 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontWeight: 600 }}>TikTok Ads</span>
+                    <span className={`badge ${tiktokCred ? 'badge-green' : 'badge-gray'}`}>{tiktokCred ? 'Connected' : 'Not connected'}</span>
+                  </div>
+                  {tiktokCred ? (
+                    <button type="button" className="btn btn-outline btn-sm" onClick={() => handleDisconnect('tiktok')} disabled={disconnecting === 'tiktok'}>
+                      {disconnecting === 'tiktok' ? 'Disconnecting…' : 'Disconnect'}
+                    </button>
+                  ) : (
+                    <button type="button" className="btn btn-primary" onClick={handleConnectTiktok} disabled={connectingTiktok}>
+                      {connectingTiktok ? 'Connecting…' : 'Connect TikTok Ads'}
+                    </button>
+                  )}
+                </div>
+                <p className="help-text" style={{ margin: '8px 0 0', maxWidth: 720 }}>
+                  In TikTok for Business → your app → Advertiser redirect URLs, add this value exactly (scheme, host, path, and no trailing slash unless shown):
+                  {' '}
+                  <code style={{ fontSize: 12, wordBreak: 'break-all' }}>{redirectUri}</code>
+                  {' '}
+                  A root URL like <code style={{ fontSize: 12 }}>https://example.com</code> alone will not match <code style={{ fontSize: 12 }}>https://example.com/oauth/callback</code>.
+                </p>
+                <div style={{ marginTop: 16, padding: 12, border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg-secondary)', maxWidth: 720 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Paste redirect URL or auth code</div>
+                  <p className="help-text" style={{ margin: '0 0 8px' }}>
+                    If the code came from another domain (e.g. <code style={{ fontSize: 11 }}>https://chipperdigital.io/?auth_code=…</code>), paste the <strong>full URL</strong> so the redirect matches TikTok. If you only paste the code, this dashboard will use <code style={{ fontSize: 11 }}>{redirectUri}</code> — that must be the same redirect you used in TikTok when you generated the code. Each code works once.
+                  </p>
+                  <textarea
+                    value={tiktokPasteInput}
+                    onChange={(e) => {
+                      setTiktokPasteInput(e.target.value);
+                      if (tiktokExchangeError) setTiktokExchangeError('');
+                    }}
+                    placeholder="https://…?auth_code=… or paste auth_code only"
+                    rows={2}
+                    style={{ width: '100%', maxWidth: 680, fontSize: 12, padding: 8, borderRadius: 6, border: '1px solid var(--border)', fontFamily: 'inherit', resize: 'vertical' }}
+                    disabled={tiktokPastingCode}
+                  />
+                  <div style={{ marginTop: 8 }}>
+                    <button type="button" className="btn btn-outline btn-sm" onClick={handleTiktokPasteExchange} disabled={tiktokPastingCode || !tiktokPasteInput.trim()}>
+                      {tiktokPastingCode ? 'Saving…' : 'Exchange code & save token'}
+                    </button>
+                  </div>
+                  {tiktokExchangeError ? (
+                    <div
+                      role="alert"
+                      style={{
+                        marginTop: 10,
+                        padding: '10px 12px',
+                        fontSize: 13,
+                        lineHeight: 1.45,
+                        color: '#b91c1c',
+                        background: 'rgba(185, 28, 28, 0.08)',
+                        border: '1px solid rgba(185, 28, 28, 0.35)',
+                        borderRadius: 6,
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-word',
+                      }}
+                    >
+                      {tiktokExchangeError}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+              <AccountsTable
+                platform="tiktok"
+                accountsList={activeTiktokAccounts}
+                onSync={handleSyncTiktokAccount}
+                onSyncAll={handleSyncAllTiktok}
+                datePresetKey={tiktokDatePreset}
+                setDatePresetKey={setTiktokDatePreset}
+                customFrom={tiktokCustomFrom}
+                customTo={tiktokCustomTo}
+                setCustomFrom={setTiktokCustomFrom}
+                setCustomTo={setTiktokCustomTo}
               />
             </div>
           )}

@@ -14,6 +14,7 @@ import { CombinedDashboardPage } from './pages/CombinedDashboardPage';
 import { GoogleAdsPage } from './pages/GoogleAdsPage';
 import { RedditPage } from './pages/RedditPage';
 import { FacebookPage } from './pages/FacebookPage';
+import { TikTokPage } from './pages/TikTokPage';
 import { AgencyReportsPage } from './pages/AgencyReportsPage';
 import { MonthlyReportsPage } from './pages/MonthlyReportsPage';
 import { GA4Page } from './pages/GA4Page';
@@ -24,7 +25,6 @@ import { Admin } from './pages/Admin';
 
 const PLACEHOLDER_PAGES = {
   'bing-ads':     { title: 'Bing Ads', subtitle: 'Microsoft Advertising Performance' },
-  'tiktok-ads':   { title: 'TikTok Ads', subtitle: 'TikTok Campaign Performance' },
   'reddit-ads':   { title: 'Reddit Ads', subtitle: 'Reddit Campaign Performance' },
   'amazon-ads':   { title: 'Amazon Ads', subtitle: 'Amazon Advertising Performance' },
   'dsp':          { title: 'DSP / Programmatic', subtitle: 'The Trade Desk & DV360 Performance' },
@@ -46,6 +46,7 @@ function CurrentPage() {
   if (currentPage === 'google-ads') return <GoogleAdsPage />;
   if (currentPage === 'reddit-ads') return <RedditPage />;
   if (currentPage === 'meta-ads') return <FacebookPage />;
+  if (currentPage === 'tiktok-ads') return <TikTokPage />;
   if (currentPage === 'agency-reports') return <AgencyReportsPage />;
   if (currentPage === 'monthly-reports') return <MonthlyReportsPage />;
   if (currentPage === 'ga4' || currentPage === 'ga4-advanced') return <GA4Page />;

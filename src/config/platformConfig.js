@@ -78,6 +78,12 @@ export const PLATFORM_REPORT_TABS = {
     { tab_key: 'placements', tab_label: 'Placements', tab_order: 3 },
     { tab_key: 'daily', tab_label: 'Daily Breakdown', tab_order: 4 },
   ],
+  tiktok_ads: [
+    { tab_key: 'campaigns', tab_label: 'Campaigns', tab_order: 1 },
+    { tab_key: 'adgroups', tab_label: 'Ad Groups', tab_order: 2 },
+    { tab_key: 'placements', tab_label: 'Placements', tab_order: 3 },
+    { tab_key: 'daily', tab_label: 'Daily Breakdown', tab_order: 4 },
+  ],
   ga4: [
     { tab_key: 'overview', tab_label: 'Overview', tab_order: 1 },
     { tab_key: 'daily', tab_label: 'Daily', tab_order: 2 },

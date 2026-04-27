@@ -15,19 +15,21 @@ export function CombinedDashboardPage() {
   const { hasPermission } = useAuth();
   const {
     filters, batchUpdateFilters, fetchData, loading, error, hasData,
-    gadsAccounts, fbAccounts, redditAccounts, ga4Accounts,
-    gadsAccountsCompare, fbAccountsCompare, redditAccountsCompare, ga4AccountsCompare,
-    gadsCampaigns, fbCampaigns, redditCampaigns,
+    gadsAccounts, fbAccounts, redditAccounts, tiktokAccounts, ga4Accounts,
+    gadsAccountsCompare, fbAccountsCompare, redditAccountsCompare, tiktokAccountsCompare, ga4AccountsCompare,
+    gadsCampaigns, fbCampaigns, redditCampaigns, tiktokCampaigns,
     primaryRangeLabel, compareRangeLabel,
   } = useCombinedDashboardData();
 
   const [expandedGads, setExpandedGads] = useState(null);
   const [expandedFb, setExpandedFb] = useState(null);
   const [expandedReddit, setExpandedReddit] = useState(null);
+  const [expandedTiktok, setExpandedTiktok] = useState(null);
 
   const toggleGads = useCallback((cid) => setExpandedGads((p) => (p === cid ? null : cid)), []);
   const toggleFb = useCallback((cid) => setExpandedFb((p) => (p === cid ? null : cid)), []);
   const toggleReddit = useCallback((cid) => setExpandedReddit((p) => (p === cid ? null : cid)), []);
+  const toggleTiktok = useCallback((cid) => setExpandedTiktok((p) => (p === cid ? null : cid)), []);
 
   const handleDateApply = useCallback((payload) => {
     batchUpdateFilters({
@@ -43,6 +45,7 @@ export function CombinedDashboardPage() {
   const gadsCmpMap = useMemo(() => accountsToCompareMap(gadsAccountsCompare), [gadsAccountsCompare]);
   const fbCmpMap = useMemo(() => accountsToCompareMap(fbAccountsCompare), [fbAccountsCompare]);
   const redditCmpMap = useMemo(() => accountsToCompareMap(redditAccountsCompare), [redditAccountsCompare]);
+  const tiktokCmpMap = useMemo(() => accountsToCompareMap(tiktokAccountsCompare), [tiktokAccountsCompare]);
   const ga4CmpMap = useMemo(() => accountsToCompareMap(ga4AccountsCompare), [ga4AccountsCompare]);
 
   const tabs = useMemo(() => {
@@ -50,9 +53,10 @@ export function CombinedDashboardPage() {
     if (gadsAccounts.length > 0) t.push({ id: 'google_ads', label: `Google Ads (${gadsAccounts.length})` });
     if (fbAccounts.length > 0) t.push({ id: 'facebook', label: `Facebook (${fbAccounts.length})` });
     if (redditAccounts.length > 0) t.push({ id: 'reddit', label: `Reddit (${redditAccounts.length})` });
+    if (tiktokAccounts.length > 0) t.push({ id: 'tiktok', label: `TikTok (${tiktokAccounts.length})` });
     if (ga4Accounts.length > 0) t.push({ id: 'ga4', label: `GA4 (${ga4Accounts.length})` });
     return t;
-  }, [gadsAccounts, fbAccounts, redditAccounts, ga4Accounts]);
+  }, [gadsAccounts, fbAccounts, redditAccounts, tiktokAccounts, ga4Accounts]);
 
   const [activeTab, setActiveTab] = useState('google_ads');
 
@@ -176,6 +180,21 @@ export function CombinedDashboardPage() {
                       toggleExpand={toggleReddit}
                       compareOn={filters.compareOn}
                       compareById={redditCmpMap}
+                      primaryRangeLabel={primaryRangeLabel}
+                      compareRangeLabel={compareRangeLabel}
+                    />
+                  )}
+
+                  {activeTab === 'tiktok' && (
+                    <CombinedDashboardAccountTable
+                      key={`tiktok-${filters.compareOn}`}
+                      accounts={tiktokAccounts}
+                      campaigns={tiktokCampaigns}
+                      platform="tiktok"
+                      expanded={expandedTiktok}
+                      toggleExpand={toggleTiktok}
+                      compareOn={filters.compareOn}
+                      compareById={tiktokCmpMap}
                       primaryRangeLabel={primaryRangeLabel}
                       compareRangeLabel={compareRangeLabel}
                     />
