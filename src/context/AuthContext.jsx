@@ -179,7 +179,7 @@ export function AuthProvider({ children }) {
         console.warn('[Auth] user_profiles.agency_id is null — platform account lists and RLS may show no data. Assign an agency to this user.');
       }
 
-      let cpaQuery = supabase.from('client_platform_accounts').select('id,platform_customer_id,account_name,platform,agency_id').eq('is_active', true);
+      let cpaQuery = supabase.from('client_platform_accounts').select('id,platform_customer_id,account_name,platform,agency_id,client_id').eq('is_active', true);
       const filterAgencyId = (isSuperAdmin && activeAgencyIdRef.current) ? activeAgencyIdRef.current : (profile.agency_id || '00000000-0000-0000-0000-000000000000');
       cpaQuery = cpaQuery.eq('agency_id', filterAgencyId);
       const { data: cpaData, error: cpaErr } = await withTimeout(cpaQuery, SUPABASE_TIMEOUT_MS);
@@ -190,7 +190,19 @@ export function AuthProvider({ children }) {
         const { data: ucData } = await supabase.from('user_clients').select('client_id').eq('user_id', userId);
         const assignedClientIds = new Set((ucData || []).map((r) => r.client_id));
         if (assignedClientIds.size > 0) {
-          cpaFiltered = (cpaData || []).filter((r) => assignedClientIds.has(r.id));
+          // `user_clients.client_id` points to client_platform_accounts.id.
+          // Expand direct assignments to include sibling accounts in the same `client_id` group
+          // so assigning one client account grants access to all its platform accounts (e.g. TikTok).
+          const assignedRows = (cpaData || []).filter((r) => assignedClientIds.has(r.id));
+          const groupedClientIds = new Set(
+            assignedRows
+              .map((r) => r.client_id)
+              .filter((v) => v != null && String(v).trim() !== '')
+          );
+          cpaFiltered = (cpaData || []).filter((r) => {
+            if (assignedClientIds.has(r.id)) return true;
+            return r.client_id != null && groupedClientIds.has(r.client_id);
+          });
         }
       }
       if (!isSuperAdmin && viewAll && (cpaFiltered || []).length === 0) {

@@ -33,7 +33,7 @@ const AppContext = createContext(null);
 
 export function AppProvider({ children }) {
   migrateBrand();
-  const { allowedClientAccounts, activeAgencyId, displayAgency } = useAuth();
+  const { allowedClientAccounts, activeAgencyId, displayAgency, canViewAllCustomers } = useAuth();
 
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -141,6 +141,14 @@ export function AppProvider({ children }) {
   useEffect(() => {
     setCurrentClient(null);
   }, [activeAgencyId]);
+
+  useEffect(() => {
+    if (canViewAllCustomers) return;
+    if (currentClient) return;
+    if (!(allowedClientAccounts || []).length) return;
+    // Restricted users should default to their assigned client context.
+    setCurrentClient(String(allowedClientAccounts[0].platform_customer_id));
+  }, [canViewAllCustomers, currentClient, allowedClientAccounts]);
 
   useEffect(() => {
     const root = typeof document !== 'undefined' ? document.documentElement : null;

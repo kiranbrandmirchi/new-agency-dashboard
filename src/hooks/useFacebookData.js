@@ -2,6 +2,7 @@ import { useState, useCallback, useMemo, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { getEffectiveAgencyScopeId } from '../lib/agencyScope';
+import { useApp } from '../context/AppContext';
 
 const GMT5_OFFSET_MS = -5 * 60 * 60 * 1000;
 
@@ -49,6 +50,7 @@ function num(v) { return Number(v) || 0; }
 
 export function useFacebookData() {
   const { activeAgencyId, agencyId, userProfile, userRole, allowedClientAccounts, canViewAllCustomers } = useAuth();
+  const { selectedClientId } = useApp();
   const isSuperAdmin = !!(userProfile?.is_super_admin || userRole?.toLowerCase() === 'super_admin');
   const scopeAgencyId = useMemo(
     () => getEffectiveAgencyScopeId(isSuperAdmin, activeAgencyId, agencyId),
@@ -90,16 +92,24 @@ export function useFacebookData() {
       if (aid && canViewAllCustomers) {
         const { data } = await supabase
           .from('client_platform_accounts')
-          .select('platform_customer_id, account_name')
+          .select('platform_customer_id, account_name, client_id')
           .eq('agency_id', aid)
           .eq('platform', 'facebook')
           .eq('is_active', true)
           .order('account_name');
-        accounts = (data || []).map((r) => ({ id: r.platform_customer_id, name: r.account_name || r.platform_customer_id }));
+        accounts = (data || []).map((r) => ({
+          id: r.platform_customer_id,
+          name: r.account_name || r.platform_customer_id,
+          client_id: r.client_id || null,
+        }));
       } else {
         accounts = (allowedClientAccounts || [])
           .filter((a) => a.platform === 'facebook')
-          .map((a) => ({ id: a.platform_customer_id, name: a.account_name || a.client_name || a.platform_customer_id }));
+          .map((a) => ({
+            id: a.platform_customer_id,
+            name: a.account_name || a.client_name || a.platform_customer_id,
+            client_id: a.client_id || null,
+          }));
       }
       setFacebookAccounts(accounts);
 
@@ -166,6 +176,28 @@ export function useFacebookData() {
       setFilters((prev) => ({ ...prev, customerId: 'ALL' }));
     }
   }, [facebookAccounts, filters.customerId]);
+
+  useEffect(() => {
+    if (!facebookAccounts.length || !selectedClientId) return;
+
+    const selectedFromAllowed = (allowedClientAccounts || [])
+      .find((a) => String(a.platform_customer_id) === String(selectedClientId));
+    const selectedGroupId = selectedFromAllowed?.client_id || null;
+
+    let nextCustomerId = null;
+    if (selectedGroupId) {
+      const groupedFacebook = facebookAccounts.find((a) => a.client_id && a.client_id === selectedGroupId);
+      if (groupedFacebook?.id) nextCustomerId = groupedFacebook.id;
+    }
+    if (!nextCustomerId) {
+      const directFacebook = facebookAccounts.find((a) => String(a.id) === String(selectedClientId));
+      if (directFacebook?.id) nextCustomerId = directFacebook.id;
+    }
+    if (!nextCustomerId) return;
+    if (String(filters.customerId || 'ALL') === String(nextCustomerId)) return;
+
+    setFilters((prev) => ({ ...prev, customerId: nextCustomerId }));
+  }, [selectedClientId, facebookAccounts, allowedClientAccounts, filters.customerId]);
 
   const kpis = useMemo(() => {
     const rows = rawCampaigns;
