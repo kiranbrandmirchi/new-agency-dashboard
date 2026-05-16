@@ -72,6 +72,10 @@ export function OAuthCallback() {
       setStep('tiktok_exchange');
       return;
     }
+    if (statePlatform === 'bing') {
+      setStep('bing_exchange');
+      return;
+    }
     if (statePlatform === 'ga4') {
       setStep('ga4_exchange');
       return;
@@ -178,6 +182,38 @@ export function OAuthCallback() {
     })();
     return () => { cancelled = true; };
   }, [step, authCode, session, effectiveAgencyId, redirectUri, navigate, showNotification, showPage]);
+
+  useEffect(() => {
+    if (step !== 'bing_exchange' || !code || !session || !effectiveAgencyId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error: fnError } = await supabase.functions.invoke('bing-oauth-connect', {
+          body: {
+            action: 'exchange_code',
+            code,
+            redirect_uri: redirectUri,
+            agency_id: effectiveAgencyId,
+          },
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+        if (cancelled) return;
+        if (data?.error || fnError) {
+          const msg = [data?.error, data?.detail, data?.hint].filter(Boolean).join(' — ') || fnError?.message || 'Failed';
+          throw new Error(msg);
+        }
+        showNotification?.(data?.message || 'Bing / Microsoft Ads connected successfully');
+        showPage?.('settings');
+        navigate('/');
+      } catch (err) {
+        if (cancelled) return;
+        showNotification?.(err?.message || 'Failed to connect Bing / Microsoft Ads');
+        showPage?.('settings');
+        navigate('/');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [step, code, session, effectiveAgencyId, redirectUri, navigate, showNotification, showPage]);
 
   useEffect(() => {
     if (step !== 'facebook_exchange' || !code || !session || !effectiveAgencyId) return;

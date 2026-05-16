@@ -19,6 +19,7 @@ const PLATFORM_COLORS = {
   facebook: '#1877F2',
   reddit: '#FF4500',
   tiktok: '#010101',
+  bing: '#00809D',
   ga4: '#E37400',
 };
 
@@ -219,6 +220,7 @@ export function MonthlyReportEditor({ reportId, onBack }) {
   const fbAccs = pd.filter((a) => a.platform === 'facebook');
   const redditAccs = pd.filter((a) => a.platform === 'reddit');
   const tiktokAccs = pd.filter((a) => a.platform === 'tiktok');
+  const bingAccs = pd.filter((a) => a.platform === 'bing');
   const ga4Accs = pd.filter((a) => a.platform === 'ga4');
   const ghlAccs = pd.filter((a) => a.platform === 'ghl');
 
@@ -401,6 +403,27 @@ export function MonthlyReportEditor({ reportId, onBack }) {
                           <tbody>
                             {(acc.campaigns || []).map((c, i) => (
                               <tr key={i}><td>{c.campaign_name}</td><td className="text-right">{fU(c.cost)}</td><td className="text-right">{fI(c.impressions)}</td><td className="text-right">{fI(c.clicks)}</td><td className="text-right">{fP(c.ctr)}</td><td className="text-right">{fI(c.reach)}</td><td className="text-right">{fI(c.conversions)}</td><td className="text-right">{fU(c.purchase_value)}</td></tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ))}
+                </div></div>
+              )}
+
+              {bingAccs.length > 0 && (
+                <div className="panel" style={{ marginBottom: 24 }}><div className="panel-body">
+                  <h3 style={{ margin: '0 0 16px', color: '#00809D' }}>Bing / Microsoft Ads</h3>
+                  {bingAccs.map((acc) => (
+                    <div key={acc.accountId} style={{ marginBottom: 24 }}>
+                      <h4 style={{ marginBottom: 8 }}>{acc.label}</h4>
+                      <div className="table-wrapper">
+                        <table className="data-table gads-table">
+                          <thead><tr><th>Campaign</th><th className="text-right">Spend</th><th className="text-right">Impr.</th><th className="text-right">Clicks</th><th className="text-right">CTR</th><th className="text-right">CPC</th><th className="text-right">Conv.</th><th className="text-right">Conv. Value</th></tr></thead>
+                          <tbody>
+                            {(acc.campaigns || []).map((c, i) => (
+                              <tr key={i}><td>{c.campaign_name}</td><td className="text-right">{fU(c.cost)}</td><td className="text-right">{fI(c.impressions)}</td><td className="text-right">{fI(c.clicks)}</td><td className="text-right">{fP(c.ctr)}</td><td className="text-right">{fU(c.cpc)}</td><td className="text-right">{fI(c.conversions)}</td><td className="text-right">{fU(c.purchase_value)}</td></tr>
                             ))}
                           </tbody>
                         </table>

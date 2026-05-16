@@ -13,6 +13,7 @@ const BASE_SETTINGS_SECTIONS = [
   { id: 'google_ads', label: 'Google Ads' },
   { id: 'reddit_ads', label: 'Reddit Ads' },
   { id: 'tiktok_ads', label: 'TikTok Ads' },
+  { id: 'bing_ads', label: 'Bing / Microsoft Ads' },
   { id: 'facebook_ads', label: 'Facebook / Meta Ads' },
   { id: 'ga4', label: 'GA4 / Web Analytics' },
   { id: 'platforms', label: 'GHL' },
@@ -104,6 +105,9 @@ export function SettingsPage() {
   const [tiktokDatePreset, setTiktokDatePreset] = useState('last7');
   const [tiktokCustomFrom, setTiktokCustomFrom] = useState('');
   const [tiktokCustomTo, setTiktokCustomTo] = useState('');
+  const [bingDatePreset, setBingDatePreset] = useState('last7');
+  const [bingCustomFrom, setBingCustomFrom] = useState('');
+  const [bingCustomTo, setBingCustomTo] = useState('');
   const [facebookDatePreset, setFacebookDatePreset] = useState('last7');
   const [facebookCustomFrom, setFacebookCustomFrom] = useState('');
   const [facebookCustomTo, setFacebookCustomTo] = useState('');
@@ -122,6 +126,7 @@ export function SettingsPage() {
   const [tiktokPasteInput, setTiktokPasteInput] = useState('');
   const [tiktokPastingCode, setTiktokPastingCode] = useState(false);
   const [tiktokExchangeError, setTiktokExchangeError] = useState('');
+  const [connectingBing, setConnectingBing] = useState(false);
   const [connectingFacebook, setConnectingFacebook] = useState(false);
   const [connectingGA4, setConnectingGA4] = useState(false);
   const [disconnectingGa4CredId, setDisconnectingGa4CredId] = useState(null);
@@ -157,6 +162,14 @@ export function SettingsPage() {
     }
     return getDateRangeFromPreset(tiktokDatePreset) || getDateRangeFromPreset('last7');
   }, [tiktokDatePreset, tiktokCustomFrom, tiktokCustomTo]);
+
+  const getBingDateRange = useCallback(() => {
+    if (bingDatePreset === 'custom') {
+      if (bingCustomFrom && bingCustomTo) return { dateFrom: bingCustomFrom, dateTo: bingCustomTo };
+      return getDateRangeFromPreset('last7');
+    }
+    return getDateRangeFromPreset(bingDatePreset) || getDateRangeFromPreset('last7');
+  }, [bingDatePreset, bingCustomFrom, bingCustomTo]);
 
   const getFacebookDateRange = useCallback(() => {
     if (facebookDatePreset === 'custom') {
@@ -265,11 +278,13 @@ export function SettingsPage() {
     const gads = accounts.filter((a) => a.is_active && a.platform === 'google_ads').map((a) => a.platform_customer_id);
     const reddit = accounts.filter((a) => a.is_active && a.platform === 'reddit').map((a) => a.platform_customer_id);
     const tiktok = accounts.filter((a) => a.is_active && a.platform === 'tiktok').map((a) => a.platform_customer_id);
+    const bing = accounts.filter((a) => a.is_active && a.platform === 'bing').map((a) => a.platform_customer_id);
     const facebook = accounts.filter((a) => a.is_active && a.platform === 'facebook').map((a) => a.platform_customer_id);
     const ga4 = accounts.filter((a) => a.is_active && a.platform === 'ga4').map((a) => a.platform_customer_id);
     if (gads.length) fetchLastDayPerAccount('google_ads', gads);
     if (reddit.length) fetchLastDayPerAccount('reddit', reddit);
     if (tiktok.length) fetchLastDayPerAccount('tiktok', tiktok);
+    if (bing.length) fetchLastDayPerAccount('bing', bing);
     if (facebook.length) fetchLastDayPerAccount('facebook', facebook);
     if (ga4.length) fetchLastDayPerAccount('ga4', ga4);
   }, [accounts, effectiveAgencyId, fetchLastDayPerAccount]);
@@ -376,6 +391,43 @@ export function SettingsPage() {
       const chunkRows = data?.total_rows ?? 0;
       totalRows += chunkRows;
       await insertSyncLog(customerId, { dateFrom: chunk.start, dateTo: chunk.end, status: 'success', rowsSynced: chunkRows }, 'tiktok');
+    }
+    return { success: true, totalRows };
+  }, [insertSyncLog]);
+
+  const syncBingWithChunking = useCallback(async (customerId, dateFrom, dateTo, onProgress) => {
+    /** Bing reports cover up to 31 days per request comfortably; chunk weekly to keep
+     * report-generation polling well under the function timeout. */
+    const chunks = [];
+    const start = new Date(dateFrom);
+    const end = new Date(dateTo);
+    const cur = new Date(start);
+    while (cur <= end) {
+      const chunkEnd = new Date(cur);
+      chunkEnd.setDate(chunkEnd.getDate() + 6);
+      if (chunkEnd > end) chunkEnd.setTime(end.getTime());
+      chunks.push({ start: cur.toISOString().split('T')[0], end: chunkEnd.toISOString().split('T')[0] });
+      cur.setDate(chunkEnd.getDate() + 1);
+    }
+    let totalRows = 0;
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      if (onProgress) onProgress({ current: i + 1, total: chunks.length, dateFrom: chunk.start, dateTo: chunk.end, status: `Syncing ${chunk.start} → ${chunk.end} (${i + 1}/${chunks.length})`, rows: totalRows });
+      const { data, error } = await supabase.functions.invoke('bing-full-sync', {
+        body: {
+          customer_id: customerId,
+          mode: 'backfill',
+          date_from: chunk.start,
+          date_to: chunk.end,
+        },
+      });
+      if (error) {
+        await insertSyncLog(customerId, { dateFrom: chunk.start, dateTo: chunk.end, status: 'error', rowsSynced: 0, errorMessage: error.message }, 'bing');
+        continue;
+      }
+      const chunkRows = data?.total_rows ?? 0;
+      totalRows += chunkRows;
+      await insertSyncLog(customerId, { dateFrom: chunk.start, dateTo: chunk.end, status: 'success', rowsSynced: chunkRows }, 'bing');
     }
     return { success: true, totalRows };
   }, [insertSyncLog]);
@@ -626,6 +678,44 @@ export function SettingsPage() {
     }
   };
 
+  const handleConnectBing = async () => {
+    if (!effectiveAgencyId) {
+      showNotification(isSuperAdmin ? 'Select an agency first.' : 'No agency assigned. Contact your admin.');
+      return;
+    }
+    setConnectingBing(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        showNotification('Please sign in first.');
+        return;
+      }
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/bing-oauth-connect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({
+          action: 'get_auth_url',
+          redirect_uri: redirectUri,
+          agency_id: effectiveAgencyId,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.error || data?.message || `Failed to connect Bing Ads (${res.status})`);
+      }
+      const url = data?.url || data?.auth_url;
+      if (url) {
+        window.location.href = url;
+      } else {
+        throw new Error(data?.error || 'No auth URL returned');
+      }
+    } catch (err) {
+      showNotification(err?.message || 'Failed to connect Bing / Microsoft Ads');
+    } finally {
+      setConnectingBing(false);
+    }
+  };
+
   const handleTiktokPasteExchange = async () => {
     const { authCode, callbackRedirectUri } = parseTiktokPasteInput(tiktokPasteInput);
     if (!authCode) {
@@ -688,12 +778,14 @@ export function SettingsPage() {
         ? 'reddit-oauth-connect'
         : platform === 'tiktok'
           ? 'tiktok-oauth-connect'
-          : platform === 'ga4'
-            ? 'ga4-oauth-connect'
-            : platform === 'facebook'
-              ? 'fb-oauth-connect'
-              : 'oauth-connect';
-      const body = (platform === 'reddit' || platform === 'tiktok' || platform === 'ga4' || platform === 'facebook')
+          : platform === 'bing'
+            ? 'bing-oauth-connect'
+            : platform === 'ga4'
+              ? 'ga4-oauth-connect'
+              : platform === 'facebook'
+                ? 'fb-oauth-connect'
+                : 'oauth-connect';
+      const body = (platform === 'reddit' || platform === 'tiktok' || platform === 'bing' || platform === 'ga4' || platform === 'facebook')
         ? { action: 'disconnect', agency_id: effectiveAgencyId }
         : { action: 'disconnect', platform, agency_id: effectiveAgencyId };
       const { data, error } = await supabase.functions.invoke(fn, {
@@ -830,6 +922,27 @@ export function SettingsPage() {
       await fetchSyncLogs(account.platform_customer_id, 'tiktok');
     } catch (err) {
       showNotification(err?.message || 'TikTok sync failed');
+    } finally {
+      setSyncingAccount(null);
+      setSyncProgress(null);
+    }
+  };
+
+  const handleSyncBingAccount = async (account) => {
+    setSyncingAccount(account.id);
+    setSyncProgress({ accountId: account.id, status: 'Starting...' });
+    try {
+      const { dateFrom, dateTo } = getBingDateRange();
+      const result = await syncBingWithChunking(
+        account.platform_customer_id, dateFrom, dateTo,
+        (p) => setSyncProgress({ accountId: account.id, accountName: account.account_name, ...p })
+      );
+      showNotification(`Synced ${account.account_name}: ${result.totalRows} rows`);
+      await supabase.from('client_platform_accounts').update({ last_sync_at: new Date().toISOString(), sync_status: 'success' }).eq('id', account.id);
+      await fetchAccounts();
+      await fetchSyncLogs(account.platform_customer_id, 'bing');
+    } catch (err) {
+      showNotification(err?.message || 'Bing sync failed');
     } finally {
       setSyncingAccount(null);
       setSyncProgress(null);
@@ -1079,6 +1192,33 @@ export function SettingsPage() {
     }
   };
 
+  const handleSyncAllBing = async () => {
+    const bingAccounts = accounts.filter((a) => a.is_active && a.platform === 'bing');
+    if (!bingAccounts.length) { showNotification('No active Bing accounts.'); return; }
+    setSyncingAll(true);
+    const { dateFrom, dateTo } = getBingDateRange();
+    let totalAll = 0;
+    try {
+      for (const account of bingAccounts) {
+        setSyncProgress({ accountId: account.id, accountName: account.account_name, status: 'Starting...' });
+        const result = await syncBingWithChunking(
+          account.platform_customer_id, dateFrom, dateTo,
+          (p) => setSyncProgress({ accountId: account.id, accountName: account.account_name, ...p })
+        );
+        totalAll += result.totalRows;
+        await supabase.from('client_platform_accounts').update({ last_sync_at: new Date().toISOString(), sync_status: 'success' }).eq('id', account.id);
+        await fetchSyncLogs(account.platform_customer_id, 'bing');
+      }
+      showNotification(`Bing sync complete: ${totalAll} total rows`);
+      await fetchAccounts();
+    } catch (err) {
+      showNotification(err?.message || 'Sync failed');
+    } finally {
+      setSyncingAll(false);
+      setSyncProgress(null);
+    }
+  };
+
   const handleSaveAgency = async () => {
     if (!activeAgency?.id) return;
     setSavingAgency(true);
@@ -1131,6 +1271,7 @@ export function SettingsPage() {
   const gadsCred = credentials.find((c) => c.platform === 'google_ads' && c.is_active);
   const redditCred = credentials.find((c) => c.platform === 'reddit' && c.is_active);
   const tiktokCred = credentials.find((c) => c.platform === 'tiktok' && c.is_active);
+  const bingCred = credentials.find((c) => c.platform === 'bing' && c.is_active);
   const facebookCred = credentials.find((c) => c.platform === 'facebook' && c.is_active);
   const facebookNeedsReconnect = !!(
     facebookCred &&
@@ -1143,10 +1284,11 @@ export function SettingsPage() {
   const activeGadsAccounts = accounts.filter((a) => a.is_active && a.platform === 'google_ads');
   const activeRedditAccounts = accounts.filter((a) => a.is_active && a.platform === 'reddit');
   const activeTiktokAccounts = accounts.filter((a) => a.is_active && a.platform === 'tiktok');
+  const activeBingAccounts = accounts.filter((a) => a.is_active && a.platform === 'bing');
   const activeFacebookAccounts = accounts.filter((a) => a.is_active && a.platform === 'facebook');
   const activeGa4Accounts = accounts.filter((a) => a.is_active && a.platform === 'ga4');
 
-  const platformLabels = { google_ads: 'Google Ads', reddit: 'Reddit', tiktok: 'TikTok Ads', facebook: 'Facebook / Meta', ga4: 'GA4 / Web Analytics' };
+  const platformLabels = { google_ads: 'Google Ads', reddit: 'Reddit', tiktok: 'TikTok Ads', bing: 'Bing / Microsoft Ads', facebook: 'Facebook / Meta', ga4: 'GA4 / Web Analytics' };
   const ga4CredentialSelectOptions = ga4ActiveCredentials.map((c) => ({
     id: c.id,
     label: c.credential_label || c.google_email || 'Google account',
@@ -1168,7 +1310,7 @@ export function SettingsPage() {
     ga4CredentialSavingAccountId,
   }) => {
     const presets = DATE_PRESETS;
-    const getRange = platform === 'reddit' ? getRedditDateRange : platform === 'tiktok' ? getTiktokDateRange : platform === 'facebook' ? getFacebookDateRange : platform === 'ga4' ? getGA4DateRange : getEffectiveDateRange;
+    const getRange = platform === 'reddit' ? getRedditDateRange : platform === 'tiktok' ? getTiktokDateRange : platform === 'bing' ? getBingDateRange : platform === 'facebook' ? getFacebookDateRange : platform === 'ga4' ? getGA4DateRange : getEffectiveDateRange;
     const label = platformLabels[platform] || platform;
     const colCount = platform === 'google_ads' ? 9 : platform === 'ga4' ? 9 : 8;
     return (
@@ -1499,6 +1641,47 @@ export function SettingsPage() {
                 customTo={tiktokCustomTo}
                 setCustomFrom={setTiktokCustomFrom}
                 setCustomTo={setTiktokCustomTo}
+              />
+            </div>
+          )}
+
+          {activeSettingsSection === 'bing_ads' && (
+            <div className="settings-section">
+              <h3>Bing / Microsoft Ads</h3>
+              <div className="settings-form-group" style={{ marginBottom: 24 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontWeight: 600 }}>Bing / Microsoft Ads</span>
+                    <span className={`badge ${bingCred ? 'badge-green' : 'badge-gray'}`}>{bingCred ? 'Connected' : 'Not connected'}</span>
+                  </div>
+                  {bingCred ? (
+                    <button type="button" className="btn btn-outline btn-sm" onClick={() => handleDisconnect('bing')} disabled={disconnecting === 'bing'}>
+                      {disconnecting === 'bing' ? 'Disconnecting…' : 'Disconnect'}
+                    </button>
+                  ) : (
+                    <button type="button" className="btn btn-primary" onClick={handleConnectBing} disabled={connectingBing}>
+                      {connectingBing ? 'Connecting…' : 'Connect Bing / Microsoft Ads'}
+                    </button>
+                  )}
+                </div>
+                <p className="help-text" style={{ margin: '8px 0 0', maxWidth: 720 }}>
+                  In your Microsoft Entra (Azure AD) app registration, add this exact redirect URI:
+                  {' '}
+                  <code style={{ fontSize: 12, wordBreak: 'break-all' }}>{redirectUri}</code>
+                  {' '}— and ensure the <code style={{ fontSize: 12 }}>https://ads.microsoft.com/msads.manage</code> delegated permission is granted along with <code style={{ fontSize: 12 }}>offline_access</code>. You also need an approved Microsoft Advertising Developer Token configured on the edge function (<code style={{ fontSize: 12 }}>BING_DEVELOPER_TOKEN</code>).
+                </p>
+              </div>
+              <AccountsTable
+                platform="bing"
+                accountsList={activeBingAccounts}
+                onSync={handleSyncBingAccount}
+                onSyncAll={handleSyncAllBing}
+                datePresetKey={bingDatePreset}
+                setDatePresetKey={setBingDatePreset}
+                customFrom={bingCustomFrom}
+                customTo={bingCustomTo}
+                setCustomFrom={setBingCustomFrom}
+                setCustomTo={setBingCustomTo}
               />
             </div>
           )}

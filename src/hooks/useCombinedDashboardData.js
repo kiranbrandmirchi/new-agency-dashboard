@@ -84,11 +84,13 @@ export function useCombinedDashboardData() {
   const [rawFb, setRawFb] = useState([]);
   const [rawReddit, setRawReddit] = useState([]);
   const [rawTiktok, setRawTiktok] = useState([]);
+  const [rawBing, setRawBing] = useState([]);
   const [rawGa4, setRawGa4] = useState([]);
   const [rawGadsCompare, setRawGadsCompare] = useState([]);
   const [rawFbCompare, setRawFbCompare] = useState([]);
   const [rawRedditCompare, setRawRedditCompare] = useState([]);
   const [rawTiktokCompare, setRawTiktokCompare] = useState([]);
+  const [rawBingCompare, setRawBingCompare] = useState([]);
   const [rawGa4Compare, setRawGa4Compare] = useState([]);
   const [accountMap, setAccountMap] = useState(new Map());
   /** GA4 properties linked in CPA (for empty-state copy when summary rows are missing). */
@@ -108,7 +110,7 @@ export function useCombinedDashboardData() {
     try {
       const { from, to } = computeDateRange(filters.datePreset, filters.dateFrom, filters.dateTo);
       if (!from || !to) {
-        setRawGadsCompare([]); setRawFbCompare([]); setRawRedditCompare([]); setRawTiktokCompare([]); setRawGa4Compare([]);
+        setRawGadsCompare([]); setRawFbCompare([]); setRawRedditCompare([]); setRawTiktokCompare([]); setRawBingCompare([]); setRawGa4Compare([]);
         setLoading(false);
         return;
       }
@@ -140,8 +142,8 @@ export function useCombinedDashboardData() {
       if (!canViewAllCustomers) {
         const allowedIds = (allowedClientAccounts || []).map((a) => a.platform_customer_id);
         if (allowedIds.length === 0) {
-          setRawGads([]); setRawFb([]); setRawReddit([]); setRawTiktok([]); setRawGa4([]);
-          setRawGadsCompare([]); setRawFbCompare([]); setRawRedditCompare([]); setRawTiktokCompare([]); setRawGa4Compare([]);
+          setRawGads([]); setRawFb([]); setRawReddit([]); setRawTiktok([]); setRawBing([]); setRawGa4([]);
+          setRawGadsCompare([]); setRawFbCompare([]); setRawRedditCompare([]); setRawTiktokCompare([]); setRawBingCompare([]); setRawGa4Compare([]);
           setLinkedGa4CpaCount(0);
           setLoading(false);
           return;
@@ -170,7 +172,7 @@ export function useCombinedDashboardData() {
       setAccountMap(accMap);
       setLinkedGa4CpaCount(accounts.filter((a) => a.platform === 'ga4').length);
 
-      const byPlatform = { google_ads: [], facebook: [], reddit: [], tiktok: [], ga4: [] };
+      const byPlatform = { google_ads: [], facebook: [], reddit: [], tiktok: [], bing: [], ga4: [] };
       const ga4IdSet = new Set();
       accounts.forEach((a) => {
         if (!byPlatform[a.platform]) return;
@@ -294,6 +296,33 @@ export function useCombinedDashboardData() {
         }
       }
 
+      // Bing / Microsoft Ads — `bing_campaign_daily`. Filter to campaign-grain rows
+      // (ad_group_id = '') so we don't double-count when ad-group rows are also stored.
+      let bingData = [];
+      let bingCmp = [];
+      if (byPlatform.bing.length > 0) {
+        if (filters.compareOn && cmpFrom && cmpTo) {
+          const [p, c] = await Promise.all([
+            supabase.from('bing_campaign_daily').select('*')
+              .in('customer_id', byPlatform.bing)
+              .eq('ad_group_id', '')
+              .gte('report_date', from).lte('report_date', to),
+            supabase.from('bing_campaign_daily').select('*')
+              .in('customer_id', byPlatform.bing)
+              .eq('ad_group_id', '')
+              .gte('report_date', cmpFrom).lte('report_date', cmpTo),
+          ]);
+          bingData = p.data || [];
+          bingCmp = c.data || [];
+        } else {
+          const { data } = await supabase.from('bing_campaign_daily').select('*')
+            .in('customer_id', byPlatform.bing)
+            .eq('ad_group_id', '')
+            .gte('report_date', from).lte('report_date', to);
+          bingData = data || [];
+        }
+      }
+
       // GA4 — same store as Basic GA4 report: `ga4_daily_summary` (sync / ga4_summary_report source)
       let ga4Data = [];
       let ga4Cmp = [];
@@ -312,11 +341,13 @@ export function useCombinedDashboardData() {
       setRawFb(fbData);
       setRawReddit(redditData);
       setRawTiktok(tiktokData);
+      setRawBing(bingData);
       setRawGa4(ga4Data);
       setRawGadsCompare(filters.compareOn && cmpFrom && cmpTo ? gadsCmp : []);
       setRawFbCompare(filters.compareOn && cmpFrom && cmpTo ? fbCmp : []);
       setRawRedditCompare(filters.compareOn && cmpFrom && cmpTo ? redditCmp : []);
       setRawTiktokCompare(filters.compareOn && cmpFrom && cmpTo ? tiktokCmp : []);
+      setRawBingCompare(filters.compareOn && cmpFrom && cmpTo ? bingCmp : []);
       setRawGa4Compare(filters.compareOn && cmpFrom && cmpTo ? ga4Cmp : []);
     } catch (err) {
       console.error('[Dashboard] error:', err);
@@ -327,8 +358,8 @@ export function useCombinedDashboardData() {
   }, [canViewAllCustomers, allowedClientAccounts, scopeAgencyId, selectedClientId, filters.datePreset, filters.dateFrom, filters.dateTo, filters.compareOn, filters.compareFrom, filters.compareTo]);
 
   useEffect(() => {
-    setRawGads([]); setRawFb([]); setRawReddit([]); setRawTiktok([]); setRawGa4([]);
-    setRawGadsCompare([]); setRawFbCompare([]); setRawRedditCompare([]); setRawTiktokCompare([]); setRawGa4Compare([]);
+    setRawGads([]); setRawFb([]); setRawReddit([]); setRawTiktok([]); setRawBing([]); setRawGa4([]);
+    setRawGadsCompare([]); setRawFbCompare([]); setRawRedditCompare([]); setRawTiktokCompare([]); setRawBingCompare([]); setRawGa4Compare([]);
     setAccountMap(new Map());
     setLinkedGa4CpaCount(0);
   }, [scopeAgencyId, allowedClientAccounts]);
@@ -362,6 +393,10 @@ export function useCombinedDashboardData() {
       } else if (platform === 'reddit' || platform === 'tiktok') {
         a.cost += num(r.spend); a.clicks += num(r.clicks); a.impressions += num(r.impressions); a.reach += num(r.reach);
         a.conversions += num(r.purchase_clicks || 0);
+      } else if (platform === 'bing') {
+        a.cost += num(r.spend); a.clicks += num(r.clicks); a.impressions += num(r.impressions);
+        a.conversions += num(r.conversions || 0);
+        a.purchase_value += num(r.conversions_value || 0);
       } else if (platform === 'ga4') {
         const pv = r.screen_page_views != null ? r.screen_page_views : r.page_views;
         const conv = r.key_events != null ? r.key_events : r.conversions;
@@ -412,6 +447,8 @@ export function useCombinedDashboardData() {
         a.conversions += num(r.purchase_count) + num(r.lead_count);
       } else if (platform === 'reddit' || platform === 'tiktok') {
         a.cost += num(r.spend); a.clicks += num(r.clicks); a.impressions += num(r.impressions); a.conversions += num(r.purchase_clicks || 0);
+      } else if (platform === 'bing') {
+        a.cost += num(r.spend); a.clicks += num(r.clicks); a.impressions += num(r.impressions); a.conversions += num(r.conversions || 0);
       }
     });
     // group by customer_id
@@ -433,12 +470,14 @@ export function useCombinedDashboardData() {
   const fbAccounts = useMemo(() => aggregateByAccount(rawFb, 'facebook'), [rawFb, accountMap]);
   const redditAccounts = useMemo(() => aggregateByAccount(rawReddit, 'reddit'), [rawReddit, accountMap]);
   const tiktokAccounts = useMemo(() => aggregateByAccount(rawTiktok, 'tiktok'), [rawTiktok, accountMap]);
+  const bingAccounts = useMemo(() => aggregateByAccount(rawBing, 'bing'), [rawBing, accountMap]);
   const ga4Accounts = useMemo(() => aggregateByAccount(rawGa4, 'ga4'), [rawGa4, accountMap]);
 
   const gadsAccountsCompare = useMemo(() => aggregateByAccount(rawGadsCompare, 'google_ads'), [rawGadsCompare, accountMap]);
   const fbAccountsCompare = useMemo(() => aggregateByAccount(rawFbCompare, 'facebook'), [rawFbCompare, accountMap]);
   const redditAccountsCompare = useMemo(() => aggregateByAccount(rawRedditCompare, 'reddit'), [rawRedditCompare, accountMap]);
   const tiktokAccountsCompare = useMemo(() => aggregateByAccount(rawTiktokCompare, 'tiktok'), [rawTiktokCompare, accountMap]);
+  const bingAccountsCompare = useMemo(() => aggregateByAccount(rawBingCompare, 'bing'), [rawBingCompare, accountMap]);
   const ga4AccountsCompare = useMemo(() => aggregateByAccount(rawGa4Compare, 'ga4'), [rawGa4Compare, accountMap]);
 
   /** Roll GA4 properties up to client (same date range) for dashboard overview. */
@@ -501,6 +540,7 @@ export function useCombinedDashboardData() {
   const fbCampaigns = useMemo(() => aggregateCampaigns(rawFb, 'facebook'), [rawFb]);
   const redditCampaigns = useMemo(() => aggregateCampaigns(rawReddit, 'reddit'), [rawReddit]);
   const tiktokCampaigns = useMemo(() => aggregateCampaigns(rawTiktok, 'tiktok'), [rawTiktok]);
+  const bingCampaigns = useMemo(() => aggregateCampaigns(rawBing, 'bing'), [rawBing]);
 
   // Overall KPIs: ad metrics vs GA4 (avoid mixing conversions for CPA / labels)
   const summaryKpis = useMemo(() => {
@@ -512,7 +552,7 @@ export function useCombinedDashboardData() {
     const addAd = (accs) => accs.forEach((a) => {
       k.cost += a.cost; k.clicks += a.clicks; k.impressions += a.impressions; k.ad_conversions += a.conversions;
     });
-    addAd(gadsAccounts); addAd(fbAccounts); addAd(redditAccounts); addAd(tiktokAccounts);
+    addAd(gadsAccounts); addAd(fbAccounts); addAd(redditAccounts); addAd(tiktokAccounts); addAd(bingAccounts);
     ga4Accounts.forEach((a) => {
       k.sessions += a.sessions; k.total_users += a.total_users; k.page_views += a.page_views; k.ga4_conversions += a.conversions;
     });
@@ -520,9 +560,9 @@ export function useCombinedDashboardData() {
     k.cpc = k.clicks ? k.cost / k.clicks : 0;
     k.cpa = k.ad_conversions ? k.cost / k.ad_conversions : 0;
     return k;
-  }, [gadsAccounts, fbAccounts, redditAccounts, tiktokAccounts, ga4Accounts]);
+  }, [gadsAccounts, fbAccounts, redditAccounts, tiktokAccounts, bingAccounts, ga4Accounts]);
 
-  const hasData = rawGads.length > 0 || rawFb.length > 0 || rawReddit.length > 0 || rawTiktok.length > 0 || rawGa4.length > 0;
+  const hasData = rawGads.length > 0 || rawFb.length > 0 || rawReddit.length > 0 || rawTiktok.length > 0 || rawBing.length > 0 || rawGa4.length > 0;
 
   const compareRangeResolved = useMemo(() => {
     const dr = computeDateRange(filters.datePreset, filters.dateFrom, filters.dateTo);
@@ -545,9 +585,9 @@ export function useCombinedDashboardData() {
 
   return {
     filters, updateFilter, batchUpdateFilters, fetchData, loading, error, summaryKpis, accountMap, hasData,
-    gadsAccounts, fbAccounts, redditAccounts, tiktokAccounts, ga4Accounts, ga4ByClient, linkedGa4CpaCount,
-    gadsAccountsCompare, fbAccountsCompare, redditAccountsCompare, tiktokAccountsCompare, ga4AccountsCompare,
-    gadsCampaigns, fbCampaigns, redditCampaigns, tiktokCampaigns,
+    gadsAccounts, fbAccounts, redditAccounts, tiktokAccounts, bingAccounts, ga4Accounts, ga4ByClient, linkedGa4CpaCount,
+    gadsAccountsCompare, fbAccountsCompare, redditAccountsCompare, tiktokAccountsCompare, bingAccountsCompare, ga4AccountsCompare,
+    gadsCampaigns, fbCampaigns, redditCampaigns, tiktokCampaigns, bingCampaigns,
     primaryRangeLabel, compareRangeLabel,
   };
 }

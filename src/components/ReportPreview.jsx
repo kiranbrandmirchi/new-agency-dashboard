@@ -59,6 +59,7 @@ export function ReportPreview({ report, accounts, sections, uploads, platformDat
   const fbAccs = pd.filter((a) => a.platform === 'facebook');
   const redditAccs = pd.filter((a) => a.platform === 'reddit');
   const tiktokAccs = pd.filter((a) => a.platform === 'tiktok');
+  const bingAccs = pd.filter((a) => a.platform === 'bing');
   const ga4Accs = pd.filter((a) => a.platform === 'ga4');
   const ghlAccs = pd.filter((a) => a.platform === 'ghl');
 
@@ -295,6 +296,42 @@ export function ReportPreview({ report, accounts, sections, uploads, platformDat
                   { label: 'Reach', val: (r) => r.reach, fmt: fI, align: 'r' },
                   { label: 'Conv.', val: (r) => r.conversions, fmt: fI, align: 'r' },
                   { label: 'Purch. Value', val: (r) => r.purchase_value, fmt: fU, align: 'r' },
+                ]} rows={acc.campaigns} />
+              )}
+              <SectionNotes sections={sections} prefix={`account_${acc.accountId}`} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {bingAccs.length > 0 && (
+        <div className="rp-section">
+          <div className="rp-section-header">
+            <div className="rp-section-icon" style={{ background: 'linear-gradient(135deg,#00809D,#00B294)' }}>b</div>
+            <h2>Bing / Microsoft Ads</h2>
+          </div>
+          {bingAccs.map((acc) => (
+            <div key={acc.accountId}>
+              <div className="rp-sub-header">{acc.label}</div>
+              <div className="rp-kpi-row">
+                <KpiBox label="Spend" value={fU(acc.kpis?.cost)} mom={acc.momChange?.cost} accent="#00809D" />
+                <KpiBox label="Impressions" value={fI(acc.kpis?.impressions)} mom={acc.momChange?.impressions} accent="#00B294" />
+                <KpiBox label="Clicks" value={fI(acc.kpis?.clicks)} mom={acc.momChange?.clicks} accent="#00809D" />
+                <KpiBox label="CTR" value={fP(acc.kpis?.ctr)} accent="#00B294" />
+                <KpiBox label="CPC" value={fU(acc.kpis?.cpc)} accent="#00809D" />
+                <KpiBox label="Conversions" value={fI(acc.kpis?.conversions)} mom={acc.momChange?.conversions} accent="#00B294" />
+                <KpiBox label="Conv. Value" value={fU(acc.kpis?.purchase_value)} accent="#00809D" />
+              </div>
+              {acc.campaigns?.length > 0 && (
+                <DataTable columns={[
+                  { label: 'Campaign', val: (r) => r.campaign_name },
+                  { label: 'Spend', val: (r) => r.cost, fmt: fU, align: 'r' },
+                  { label: 'Impr.', val: (r) => r.impressions, fmt: fI, align: 'r' },
+                  { label: 'Clicks', val: (r) => r.clicks, fmt: fI, align: 'r' },
+                  { label: 'CTR', val: (r) => r.ctr, fmt: fP, align: 'r' },
+                  { label: 'CPC', val: (r) => r.cpc, fmt: fU, align: 'r' },
+                  { label: 'Conv.', val: (r) => r.conversions, fmt: fI, align: 'r' },
+                  { label: 'Conv. Value', val: (r) => r.purchase_value, fmt: fU, align: 'r' },
                 ]} rows={acc.campaigns} />
               )}
               <SectionNotes sections={sections} prefix={`account_${acc.accountId}`} />

@@ -15,9 +15,9 @@ export function CombinedDashboardPage() {
   const { hasPermission } = useAuth();
   const {
     filters, batchUpdateFilters, fetchData, loading, error, hasData,
-    gadsAccounts, fbAccounts, redditAccounts, tiktokAccounts, ga4Accounts,
-    gadsAccountsCompare, fbAccountsCompare, redditAccountsCompare, tiktokAccountsCompare, ga4AccountsCompare,
-    gadsCampaigns, fbCampaigns, redditCampaigns, tiktokCampaigns,
+    gadsAccounts, fbAccounts, redditAccounts, tiktokAccounts, bingAccounts, ga4Accounts,
+    gadsAccountsCompare, fbAccountsCompare, redditAccountsCompare, tiktokAccountsCompare, bingAccountsCompare, ga4AccountsCompare,
+    gadsCampaigns, fbCampaigns, redditCampaigns, tiktokCampaigns, bingCampaigns,
     primaryRangeLabel, compareRangeLabel,
   } = useCombinedDashboardData();
 
@@ -25,11 +25,13 @@ export function CombinedDashboardPage() {
   const [expandedFb, setExpandedFb] = useState(null);
   const [expandedReddit, setExpandedReddit] = useState(null);
   const [expandedTiktok, setExpandedTiktok] = useState(null);
+  const [expandedBing, setExpandedBing] = useState(null);
 
   const toggleGads = useCallback((cid) => setExpandedGads((p) => (p === cid ? null : cid)), []);
   const toggleFb = useCallback((cid) => setExpandedFb((p) => (p === cid ? null : cid)), []);
   const toggleReddit = useCallback((cid) => setExpandedReddit((p) => (p === cid ? null : cid)), []);
   const toggleTiktok = useCallback((cid) => setExpandedTiktok((p) => (p === cid ? null : cid)), []);
+  const toggleBing = useCallback((cid) => setExpandedBing((p) => (p === cid ? null : cid)), []);
 
   const handleDateApply = useCallback((payload) => {
     batchUpdateFilters({
@@ -46,6 +48,7 @@ export function CombinedDashboardPage() {
   const fbCmpMap = useMemo(() => accountsToCompareMap(fbAccountsCompare), [fbAccountsCompare]);
   const redditCmpMap = useMemo(() => accountsToCompareMap(redditAccountsCompare), [redditAccountsCompare]);
   const tiktokCmpMap = useMemo(() => accountsToCompareMap(tiktokAccountsCompare), [tiktokAccountsCompare]);
+  const bingCmpMap = useMemo(() => accountsToCompareMap(bingAccountsCompare), [bingAccountsCompare]);
   const ga4CmpMap = useMemo(() => accountsToCompareMap(ga4AccountsCompare), [ga4AccountsCompare]);
 
   const tabs = useMemo(() => {
@@ -54,9 +57,10 @@ export function CombinedDashboardPage() {
     if (fbAccounts.length > 0) t.push({ id: 'facebook', label: `Facebook (${fbAccounts.length})` });
     if (redditAccounts.length > 0) t.push({ id: 'reddit', label: `Reddit (${redditAccounts.length})` });
     if (tiktokAccounts.length > 0) t.push({ id: 'tiktok', label: `TikTok (${tiktokAccounts.length})` });
+    if (bingAccounts.length > 0) t.push({ id: 'bing', label: `Bing (${bingAccounts.length})` });
     if (ga4Accounts.length > 0) t.push({ id: 'ga4', label: `GA4 (${ga4Accounts.length})` });
     return t;
-  }, [gadsAccounts, fbAccounts, redditAccounts, tiktokAccounts, ga4Accounts]);
+  }, [gadsAccounts, fbAccounts, redditAccounts, tiktokAccounts, bingAccounts, ga4Accounts]);
 
   const [activeTab, setActiveTab] = useState('google_ads');
 
@@ -195,6 +199,21 @@ export function CombinedDashboardPage() {
                       toggleExpand={toggleTiktok}
                       compareOn={filters.compareOn}
                       compareById={tiktokCmpMap}
+                      primaryRangeLabel={primaryRangeLabel}
+                      compareRangeLabel={compareRangeLabel}
+                    />
+                  )}
+
+                  {activeTab === 'bing' && (
+                    <CombinedDashboardAccountTable
+                      key={`bing-${filters.compareOn}`}
+                      accounts={bingAccounts}
+                      campaigns={bingCampaigns}
+                      platform="bing"
+                      expanded={expandedBing}
+                      toggleExpand={toggleBing}
+                      compareOn={filters.compareOn}
+                      compareById={bingCmpMap}
                       primaryRangeLabel={primaryRangeLabel}
                       compareRangeLabel={compareRangeLabel}
                     />
