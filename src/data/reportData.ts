@@ -145,6 +145,22 @@ export const reportData = {
 
 export type ReportData = typeof reportData;
 
+/** Merge UI selections into the report payload (slides 1–6 client/month fields, footers, etc.) */
+export function buildReportDataForSelection(
+  clientName: string,
+  monthLabel: string,
+): ReportData {
+  return {
+    ...reportData,
+    client: clientName,
+    month: monthLabel,
+    sectionDivider: {
+      ...reportData.sectionDivider,
+      subtitle: `Paid Ads Performance — ${monthLabel}`,
+    },
+  };
+}
+
 /** Slides 1–10 only */
 export const SLIDE_DEFINITIONS = [
   { num: 1, title: 'Cover — SEO & Digital Marketing Updates', type: 'cover' },

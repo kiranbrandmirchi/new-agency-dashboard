@@ -255,14 +255,6 @@ function addCoverSlide(pptx: PptxGenJS, data: ReportData, logoDataUrl: string | 
     bold: true,
     color: C.salmon,
   });
-  slide.addText(data.location, {
-    x: rightPad,
-    y: 3.02,
-    w: COVER_RIGHT_W_IN - 0.3,
-    h: 0.28,
-    fontSize: 12,
-    color: C.white,
-  });
   slide.addShape('rect', {
     x: rightPad,
     y: SLIDE_H - 0.62,

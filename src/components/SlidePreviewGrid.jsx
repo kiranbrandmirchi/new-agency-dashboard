@@ -3,11 +3,23 @@ import { SLIDE_DEFINITIONS } from '../data/reportData';
 import { SlidePreview } from './SlidePreview';
 import '../styles/pptSlidePreview.css';
 
-export function SlidePreviewGrid({ clientName, monthLabel, slidesOnly = false, exportMode = false }) {
+export function SlidePreviewGrid({
+  clientName,
+  monthLabel,
+  report,
+  slidesOnly = false,
+  exportMode = false,
+}) {
   const grid = (
     <div className="ppt-preview-grid">
       {SLIDE_DEFINITIONS.map((slide, index) => (
-        <SlidePreview key={slide.num} slide={slide} index={index} exportMode={exportMode} />
+        <SlidePreview
+          key={slide.num}
+          slide={slide}
+          index={index}
+          exportMode={exportMode}
+          report={report}
+        />
       ))}
     </div>
   );
@@ -22,7 +34,7 @@ export function SlidePreviewGrid({ clientName, monthLabel, slidesOnly = false, e
         <h3>
           {clientName} — {monthLabel} Report Preview
         </h3>
-        <p>Slides 1–10 · Hardcoded data — dynamic integration pending</p>
+        <p>Slides 1–6: client &amp; month from selections · slides 7–10: sample data</p>
       </div>
       {grid}
     </section>

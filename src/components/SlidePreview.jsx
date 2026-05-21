@@ -1,5 +1,11 @@
-import React from 'react';
+import React, { createContext, useContext } from 'react';
 import { reportData } from '../data/reportData';
+
+const ReportPreviewContext = createContext(reportData);
+
+function useReport() {
+  return useContext(ReportPreviewContext);
+}
 import '../styles/pptSlidePreview.css';
 
 const FOOTER_TEXT = (month) =>
@@ -15,9 +21,10 @@ function RedHeader({ title, right }) {
 }
 
 function RedFooter() {
+  const report = useReport();
   return (
     <div className="ppt-red-bar ppt-red-bar--footer">
-      {FOOTER_TEXT(reportData.month)}
+      {FOOTER_TEXT(report.month)}
     </div>
   );
 }
@@ -26,14 +33,15 @@ function RedSubBar({ children }) {
   return <div className="ppt-red-bar ppt-red-bar--sub">{children}</div>;
 }
 
-/** Slide 1 */
+/** Slide 1 — client name + report month from UI selections */
 function CoverSlide() {
+  const report = useReport();
   return (
     <div className="ppt-slide-inner ppt-cover">
       <div className="ppt-cover-left">
         <div className="ppt-cover-services">SERVICES</div>
         <div className="ppt-cover-rule" />
-        <div className="ppt-cover-month">{reportData.month}</div>
+        <div className="ppt-cover-month">{report.month}</div>
         <div className="ppt-cover-monthly">
           Monthly
           <br />
@@ -43,7 +51,7 @@ function CoverSlide() {
       <div className="ppt-cover-right">
         <div className="ppt-cover-logo">
           <div className="ppt-cover-logo-icon">
-            <img src={reportData.coverLogoUrl} alt="" />
+            <img src={report.coverLogoUrl} alt="" />
           </div>
           <div className="ppt-cover-logo-text">
             RED CASTLE
@@ -57,11 +65,10 @@ function CoverSlide() {
           <br />
           Updates
         </h2>
-        <p className="ppt-cover-client">{reportData.client}</p>
-        <p className="ppt-cover-location">{reportData.location}</p>
+        <p className="ppt-cover-client">{report.client}</p>
         <div className="ppt-cover-divider" />
         <p className="ppt-cover-prepared">
-          Prepared by {reportData.preparedBy} | {reportData.website}
+          Prepared by {report.preparedBy} | {report.website}
         </p>
       </div>
     </div>
@@ -70,9 +77,10 @@ function CoverSlide() {
 
 /** Slide 2 */
 function ContentSlide2() {
+  const report = useReport();
   return (
     <div className="ppt-slide-inner">
-      <RedHeader title="What We Are Managing" right={reportData.client} />
+      <RedHeader title="What We Are Managing" right={report.client} />
       <div className="ppt-slide-main">
         <div className="ppt-service-cards">
           {reportData.services.map((svc) => (
@@ -155,18 +163,20 @@ function LeadSummarySlide() {
 
 /** Slide 4 */
 function SectionSlide() {
+  const report = useReport();
   return (
     <div className="ppt-slide-inner ppt-section">
       <div className="ppt-section-accent" />
-      <h2 className="ppt-section-title">{reportData.sectionDivider.title}</h2>
+      <h2 className="ppt-section-title">{report.sectionDivider.title}</h2>
       <div className="ppt-section-rule" />
-      <p className="ppt-section-sub">{reportData.sectionDivider.subtitle}</p>
+      <p className="ppt-section-sub">{report.sectionDivider.subtitle}</p>
     </div>
   );
 }
 
 /** Slide 5 */
 function PaidAdsOverallSlide() {
+  const report = useReport();
   const icons = ['$', '↗', '👥', '📈'];
   const circleClass = [
     'ppt-kpi-icon-circle--blue',
@@ -176,7 +186,7 @@ function PaidAdsOverallSlide() {
   ];
   return (
     <div className="ppt-slide-inner">
-      <RedHeader title="Paid Ads Performance" right={reportData.client} />
+      <RedHeader title="Paid Ads Performance" right={report.client} />
       <div className="ppt-slide-main">
         <p className="ppt-subtitle-muted">March 2026 vs February 2026 cost and conversion analysis</p>
         <div className="ppt-kpi-icons">
@@ -257,10 +267,11 @@ function MetricCard({ panel, titleColor }) {
 
 /** Slide 6 */
 function PaidAdsFloridaSlide() {
-  const d = reportData.paidAdsFlorida;
+  const report = useReport();
+  const d = report.paidAdsFlorida;
   return (
     <div className="ppt-slide-inner">
-      <RedHeader title="Performance Overview" right={reportData.client} />
+      <RedHeader title="Performance Overview" right={report.client} />
       <div className="ppt-slide-main">
         <div className="ppt-metric-cards-row">
           <MetricCard panel={d.current} titleColor="red" />
@@ -462,17 +473,19 @@ function renderSlideContent(num) {
   }
 }
 
-export function SlidePreview({ slide, index, exportMode = false }) {
+export function SlidePreview({ slide, index, exportMode = false, report = reportData }) {
   return (
-    <div
-      className={`ppt-slide-card${exportMode ? ' ppt-slide-card--export' : ''}`}
-      style={exportMode ? undefined : { animationDelay: `${index * 80}ms` }}
-      aria-label={`Slide ${slide.num}: ${slide.title}`}
-    >
-      {!exportMode && (
-        <span className="ppt-slide-badge">Slide {slide.num} / 10</span>
-      )}
-      {renderSlideContent(slide.num)}
-    </div>
+    <ReportPreviewContext.Provider value={report}>
+      <div
+        className={`ppt-slide-card${exportMode ? ' ppt-slide-card--export' : ''}`}
+        style={exportMode ? undefined : { animationDelay: `${index * 80}ms` }}
+        aria-label={`Slide ${slide.num}: ${slide.title}`}
+      >
+        {!exportMode && (
+          <span className="ppt-slide-badge">Slide {slide.num} / 10</span>
+        )}
+        {renderSlideContent(slide.num)}
+      </div>
+    </ReportPreviewContext.Provider>
   );
 }

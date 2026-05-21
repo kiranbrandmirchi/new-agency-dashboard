@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { supabase } from '../lib/supabaseClient';
-import { reportData } from '../data/reportData';
+import { buildReportDataForSelection } from '../data/reportData';
 import { generatePptx } from '../utils/generatePptx';
 import { generatePdf, waitForPaint } from '../utils/generatePdf';
 import { SlidePreviewGrid } from '../components/SlidePreviewGrid';
@@ -65,17 +65,27 @@ export function PptReportPage() {
     }
     setClientsLoading(true);
     setClientsError(null);
+    // See backups/PptReportPage-loadClients.clients-table.backup.js for previous clients-table query
     const { data, error } = await supabase
-      .from('clients')
-      .select('id, name')
+      .from('client_platform_accounts')
+      .select('platform_customer_id, account_name')
       .eq('agency_id', effectiveAgencyId)
-      .order('name');
+      .eq('is_active', true)
+      .order('account_name');
     if (error) {
-      console.warn('[PptReport] clients error:', error);
+      console.warn('[PptReport] client_platform_accounts error:', error);
       setClientsError(error.message || 'Failed to load clients');
       setClients([]);
     } else {
-      setClients(data || []);
+      const byCustomerId = new Map();
+      for (const row of data || []) {
+        const id = row.platform_customer_id != null ? String(row.platform_customer_id).trim() : '';
+        if (!id || byCustomerId.has(id)) continue;
+        byCustomerId.set(id, (row.account_name || id).trim());
+      }
+      const list = Array.from(byCustomerId, ([id, name]) => ({ id, name }));
+      list.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+      setClients(list);
     }
     setClientsLoading(false);
   }, [effectiveAgencyId]);
@@ -92,12 +102,15 @@ export function PptReportPage() {
 
   const selectedMonthLabel = MONTH_OPTIONS.find((o) => o.value === selectedMonth)?.label || selectedMonth;
   const selectedClientName = clients.find((c) => c.id === selectedClientId)?.name ?? '';
+  const activeReportData = useMemo(
+    () => buildReportDataForSelection(selectedClientName, selectedMonthLabel),
+    [selectedClientName, selectedMonthLabel],
+  );
   const applyDisabled = !selectedClientId || !selectedMonth;
   const downloadsDisabled = !selectedClientId || !selectedMonth;
 
   const handleApply = () => {
     if (!selectedClientId || !selectedMonth) return;
-    // TODO: replace reportData with Supabase fetch using selectedClientId + selectedMonth
     setPreviewVisible(true);
     showNotification(`Preview loaded: ${selectedClientName} — ${selectedMonthLabel}`);
     setTimeout(() => previewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
@@ -107,7 +120,7 @@ export function PptReportPage() {
     if (!selectedClientId || !selectedMonth) return;
     setGeneratingFormat('ppt');
     try {
-      await generatePptx(reportData, {
+      await generatePptx(activeReportData, {
         clientName: selectedClientName,
         monthLabel: selectedMonthLabel,
       });
@@ -246,7 +259,11 @@ export function PptReportPage() {
 
         {previewVisible && selectedClientId && (
           <div ref={previewRef}>
-            <SlidePreviewGrid clientName={selectedClientName} monthLabel={selectedMonthLabel} />
+            <SlidePreviewGrid
+              clientName={selectedClientName}
+              monthLabel={selectedMonthLabel}
+              report={activeReportData}
+            />
           </div>
         )}
 
@@ -257,6 +274,7 @@ export function PptReportPage() {
               exportMode
               clientName={selectedClientName}
               monthLabel={selectedMonthLabel}
+              report={activeReportData}
             />
           </div>
         )}
