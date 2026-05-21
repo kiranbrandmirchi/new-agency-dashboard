@@ -11,7 +11,10 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
     "chart.js": "^4.4.0",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^4.2.1",
     "papaparse": "^5.5.3",
+    "pptxgenjs": "^4.0.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^7.13.1",

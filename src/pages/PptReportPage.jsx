@@ -1,7 +1,13 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { supabase } from '../lib/supabaseClient';
+import { reportData } from '../data/reportData';
+import { generatePptx } from '../utils/generatePptx';
+import { generatePdf, waitForPaint } from '../utils/generatePdf';
+import { SlidePreviewGrid } from '../components/SlidePreviewGrid';
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function getMonthOptions() {
   const options = [];
@@ -45,6 +51,11 @@ export function PptReportPage() {
   const [selectedMonth, setSelectedMonth] = useState(MONTH_OPTIONS[0]?.value || '');
   const [clientsLoading, setClientsLoading] = useState(true);
   const [clientsError, setClientsError] = useState(null);
+  const [previewVisible, setPreviewVisible] = useState(false);
+  const [generatingFormat, setGeneratingFormat] = useState(null);
+  const [pdfExportMount, setPdfExportMount] = useState(false);
+  const previewRef = useRef(null);
+  const pdfExportRef = useRef(null);
 
   const loadClients = useCallback(async () => {
     if (!effectiveAgencyId) {
@@ -73,28 +84,73 @@ export function PptReportPage() {
     loadClients();
   }, [loadClients]);
 
+  useEffect(() => {
+    if (!selectedClientId) {
+      setPreviewVisible(false);
+    }
+  }, [selectedClientId]);
+
   const selectedMonthLabel = MONTH_OPTIONS.find((o) => o.value === selectedMonth)?.label || selectedMonth;
+  const selectedClientName = clients.find((c) => c.id === selectedClientId)?.name ?? '';
+  const applyDisabled = !selectedClientId || !selectedMonth;
+  const downloadsDisabled = !selectedClientId || !selectedMonth;
 
   const handleApply = () => {
-    console.log('[PptReport] Apply', { clientId: selectedClientId, month: selectedMonth });
-    showNotification(
-      selectedClientId
-        ? `Applied: ${clients.find((c) => c.id === selectedClientId)?.name || selectedClientId} — ${selectedMonthLabel}`
-        : 'Select a client first',
-    );
+    if (!selectedClientId || !selectedMonth) return;
+    // TODO: replace reportData with Supabase fetch using selectedClientId + selectedMonth
+    setPreviewVisible(true);
+    showNotification(`Preview loaded: ${selectedClientName} — ${selectedMonthLabel}`);
+    setTimeout(() => previewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
   };
 
-  const handleDownloadPpt = () => {
-    // TODO: Wire up PPT export API / storage download when backend is ready.
-    console.log('Download PPT', { clientId: selectedClientId, month: selectedMonth });
+  const handleDownloadPpt = async () => {
+    if (!selectedClientId || !selectedMonth) return;
+    setGeneratingFormat('ppt');
+    try {
+      await generatePptx(reportData, {
+        clientName: selectedClientName,
+        monthLabel: selectedMonthLabel,
+      });
+      showNotification(`Downloaded: ${selectedClientName} — ${selectedMonthLabel}`);
+    } catch (err) {
+      console.warn('[PptReport] generatePptx error:', err);
+      showNotification(err?.message || 'Failed to generate PowerPoint');
+    } finally {
+      setGeneratingFormat(null);
+    }
   };
 
-  const handleDownloadPdf = () => {
-    // TODO: Wire up PDF export API / storage download when backend is ready.
-    console.log('Download PDF', { clientId: selectedClientId, month: selectedMonth });
-  };
+  const handleDownloadPdf = async () => {
+    if (!selectedClientId || !selectedMonth) return;
+    setGeneratingFormat('pdf');
+    setPdfExportMount(true);
+    try {
+      await waitForPaint();
+      await sleep(500);
+      if (document.fonts?.ready) {
+        await document.fonts.ready;
+      }
 
-  const downloadsDisabled = !selectedClientId;
+      const container = pdfExportRef.current;
+      const slideEls = container?.querySelectorAll('.ppt-slide-card');
+      if (!slideEls?.length) {
+        throw new Error('No slides available to export');
+      }
+
+      await generatePdf(Array.from(slideEls), {
+        clientName: selectedClientName,
+        monthLabel: selectedMonthLabel,
+      });
+
+      showNotification(`PDF downloaded: ${selectedClientName} — ${selectedMonthLabel}`);
+    } catch (err) {
+      console.warn('[PptReport] generatePdf error:', err);
+      showNotification(err?.message || 'Failed to generate PDF');
+    } finally {
+      setGeneratingFormat(null);
+      setPdfExportMount(false);
+    }
+  };
 
   return (
     <div className="page-section active" id="page-ppt-report">
@@ -119,7 +175,11 @@ export function PptReportPage() {
                 <label>Clients List</label>
                 <select
                   value={selectedClientId}
-                  onChange={(e) => setSelectedClientId(e.target.value)}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setSelectedClientId(value);
+                    if (!value) setPreviewVisible(false);
+                  }}
                   disabled={clientsLoading || !!clientsError}
                 >
                   <option value="">
@@ -149,35 +209,57 @@ export function PptReportPage() {
               <div className="gads-filter-group gads-filter-actions">
                 <label>Actions</label>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-                  <button type="button" className="btn btn-primary btn-sm" onClick={handleApply}>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={handleApply}
+                    disabled={applyDisabled}
+                  >
                     Apply
                   </button>
                   <button
                     type="button"
                     className="btn btn-outline btn-sm"
                     onClick={handleDownloadPpt}
-                    disabled={downloadsDisabled}
+                    disabled={downloadsDisabled || generatingFormat !== null}
                     title={downloadsDisabled ? 'Select a client first' : 'Download PowerPoint report'}
                   >
                     <DownloadIcon />
-                    Download PPT
+                    {generatingFormat === 'ppt' ? 'Generating…' : 'Download PPT'}
                   </button>
                   <button
                     type="button"
                     className="btn btn-outline btn-sm"
                     onClick={handleDownloadPdf}
-                    disabled={downloadsDisabled}
+                    disabled={downloadsDisabled || generatingFormat !== null}
                     style={{ color: downloadsDisabled ? undefined : '#dc2626', borderColor: downloadsDisabled ? undefined : '#dc2626' }}
                     title={downloadsDisabled ? 'Select a client first' : 'Download PDF report'}
                   >
                     <PdfIcon />
-                    Download PDF
+                    {generatingFormat === 'pdf' ? 'Generating PDF…' : 'Download PDF'}
                   </button>
                 </div>
               </div>
             </div>
           </div>
         </div>
+
+        {previewVisible && selectedClientId && (
+          <div ref={previewRef}>
+            <SlidePreviewGrid clientName={selectedClientName} monthLabel={selectedMonthLabel} />
+          </div>
+        )}
+
+        {pdfExportMount && selectedClientId && (
+          <div ref={pdfExportRef} className="ppt-pdf-export-root" aria-hidden="true">
+            <SlidePreviewGrid
+              slidesOnly
+              exportMode
+              clientName={selectedClientName}
+              monthLabel={selectedMonthLabel}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

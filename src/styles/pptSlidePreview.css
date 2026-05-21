@@ -1,0 +1,809 @@
+/* PPT slide preview — matches Neulife reference deck */
+
+.ppt-preview-section {
+  margin-top: 28px;
+}
+
+.ppt-preview-header {
+  margin-bottom: 20px;
+}
+
+.ppt-preview-header h3 {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--navy);
+  margin: 0 0 6px;
+}
+
+.ppt-preview-header p {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.ppt-preview-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.ppt-slide-card {
+  position: relative;
+  width: 100%;
+  max-width: 960px;
+  aspect-ratio: 16 / 9;
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.14);
+  border: 1px solid #d4d4d4;
+  opacity: 0;
+  transform: translateY(12px);
+  animation: pptSlideIn 300ms ease forwards;
+  container-type: inline-size;
+  container-name: slide;
+}
+
+@keyframes pptSlideIn {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.ppt-slide-card--export {
+  opacity: 1 !important;
+  transform: none !important;
+  animation: none !important;
+}
+
+/* Source DOM for PDF clones — behind app UI, must stay visible for text layout */
+.ppt-pdf-export-root {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 960px;
+  pointer-events: none;
+  z-index: -1;
+  overflow: hidden;
+  height: 0;
+}
+
+/* Visible host appended to body during each html2canvas capture */
+.ppt-pdf-capture-host {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 960px;
+  height: 540px;
+  z-index: 2147483646;
+  opacity: 0.01;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.ppt-pdf-capture-host .ppt-slide-card {
+  width: 960px !important;
+  max-width: 960px !important;
+  min-width: 960px !important;
+  height: 540px !important;
+  aspect-ratio: auto !important;
+  opacity: 1 !important;
+  transform: none !important;
+  animation: none !important;
+  container-type: inline-size;
+}
+
+.ppt-pdf-export-root .ppt-preview-grid {
+  gap: 0;
+}
+
+/* Fixed 16:9 capture size — one full page per slide in PDF */
+.ppt-pdf-export-root .ppt-slide-card {
+  width: 960px;
+  max-width: 960px;
+  min-width: 960px;
+  height: 540px;
+  aspect-ratio: auto;
+  margin: 0;
+  box-shadow: none;
+  border-radius: 0;
+  border: none;
+  opacity: 1;
+  transform: none;
+  animation: none;
+}
+
+.ppt-slide-badge {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  z-index: 20;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+}
+
+.ppt-slide-inner {
+  width: 100%;
+  height: 100%;
+  font-family: var(--font-family, 'Segoe UI', Arial, sans-serif);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Shared red chrome ── */
+.ppt-red-bar {
+  background: #b91c1c;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.ppt-red-bar--header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  min-height: 40px;
+}
+
+.ppt-red-bar--header h4 {
+  margin: 0;
+  font-size: clamp(11px, 1.4vw, 15px);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.ppt-red-bar--header .ppt-header-right {
+  font-size: clamp(9px, 1.1vw, 11px);
+  font-weight: 400;
+  text-align: right;
+  max-width: 42%;
+}
+
+.ppt-red-bar--sub {
+  padding: 6px 16px;
+  font-size: clamp(9px, 1vw, 11px);
+  font-weight: 600;
+}
+
+.ppt-red-bar--footer {
+  padding: 6px 16px;
+  font-size: clamp(7px, 0.85vw, 9px);
+  font-style: italic;
+  margin-top: auto;
+}
+
+.ppt-slide-main {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 14px;
+  background: #ececec;
+}
+
+.ppt-slide-main--flush {
+  padding: 0;
+}
+
+/* ── Slide 1 Cover (full-height 34% red | 66% dark split) ── */
+.ppt-slide-inner.ppt-cover {
+  flex-direction: row;
+  align-items: stretch;
+  background: #1a1a1a;
+}
+
+.ppt-cover-left {
+  flex: 0 0 34%;
+  width: 34%;
+  min-height: 100%;
+  background: #c41e24;
+  padding: 7% 6%;
+  display: flex;
+  flex-direction: column;
+  color: #fff;
+  box-sizing: border-box;
+}
+
+.ppt-cover-services {
+  font-size: clamp(8px, 0.95cqi, 10px);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.ppt-cover-rule {
+  width: 52%;
+  height: 3px;
+  background: #fff;
+  margin: 8px 0 10px;
+  flex-shrink: 0;
+}
+
+.ppt-cover-month {
+  font-size: clamp(9px, 1.15cqi, 12px);
+  font-weight: 400;
+}
+
+.ppt-cover-monthly {
+  font-size: clamp(11px, 1.35cqi, 14px);
+  font-weight: 700;
+  line-height: 1.25;
+  margin-top: auto;
+  padding-bottom: 6%;
+}
+
+.ppt-cover-right {
+  flex: 1;
+  min-width: 0;
+  min-height: 100%;
+  padding: 6% 6% 5%;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  box-sizing: border-box;
+}
+
+.ppt-cover-logo {
+  position: absolute;
+  top: 6%;
+  right: 6%;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  z-index: 2;
+}
+
+.ppt-cover-logo-icon {
+  width: clamp(22px, 3cqi, 30px);
+  height: clamp(22px, 3cqi, 30px);
+  background: #fff;
+  border-radius: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.ppt-cover-logo-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.ppt-cover-logo-text {
+  color: #fff;
+  font-size: clamp(7px, 0.9cqi, 9px);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.ppt-cover-logo-text span {
+  display: block;
+  font-size: clamp(6px, 0.78cqi, 8px);
+  font-weight: 400;
+}
+
+.ppt-cover-title {
+  font-size: clamp(20px, 3.35cqi, 34px);
+  font-weight: 800;
+  color: #fff;
+  line-height: 1.1;
+  margin: 10% 0 0;
+  padding-right: 32%;
+  max-width: 100%;
+}
+
+.ppt-cover-client {
+  font-size: clamp(12px, 1.65cqi, 17px);
+  font-weight: 700;
+  color: #f08080;
+  margin: 10px 0 0;
+}
+
+.ppt-cover-location {
+  font-size: clamp(10px, 1.25cqi, 13px);
+  font-weight: 400;
+  color: #fff;
+  margin: 4px 0 0;
+}
+
+.ppt-cover-divider {
+  height: 2px;
+  background: #555;
+  margin-top: auto;
+  margin-bottom: 8px;
+  max-width: 92%;
+  flex-shrink: 0;
+}
+
+.ppt-cover-prepared {
+  font-size: clamp(7px, 0.9cqi, 9px);
+  color: #999;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+/* ── Slide 4 Section divider ── */
+.ppt-section {
+  height: 100%;
+  background: #801818;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 0 0 4%;
+  position: relative;
+}
+
+.ppt-section-accent {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: #a82828;
+}
+
+.ppt-section-title {
+  font-size: clamp(26px, 4vw, 38px);
+  font-weight: 800;
+  color: #fff;
+  margin: 0 0 16px;
+  padding-left: 12px;
+}
+
+.ppt-section-sub {
+  font-size: clamp(11px, 1.4vw, 15px);
+  font-style: italic;
+  color: #fff;
+  margin: 0;
+  padding-left: 12px;
+}
+
+.ppt-section-rule {
+  width: 42%;
+  height: 2px;
+  background: #a82828;
+  margin: 0 0 14px 12px;
+}
+
+/* ── Slide 2 service cards ── */
+.ppt-service-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+  justify-content: center;
+}
+
+.ppt-service-card {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  background: #fff;
+  padding: 12px 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  border-left: 5px solid #b91c1c;
+}
+
+.ppt-service-card-icon {
+  font-size: clamp(18px, 2.2vw, 24px);
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.ppt-service-card-title {
+  font-weight: 700;
+  font-size: clamp(10px, 1.15vw, 12px);
+  color: #1a1a1a;
+  margin-bottom: 4px;
+}
+
+.ppt-service-card-body {
+  font-size: clamp(8px, 0.95vw, 10px);
+  color: #555;
+  line-height: 1.45;
+}
+
+/* ── Tables ── */
+.ppt-table-wrap {
+  overflow: hidden;
+  border: 1px solid #333;
+  margin-bottom: 8px;
+  flex-shrink: 0;
+}
+
+.ppt-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: clamp(7px, 0.85vw, 9px);
+}
+
+.ppt-table th {
+  background: #b91c1c;
+  color: #fff;
+  font-weight: 700;
+  padding: 6px 5px;
+  text-align: center;
+  border: 1px solid #333;
+}
+
+.ppt-table th:first-child {
+  text-align: left;
+}
+
+.ppt-table td {
+  padding: 6px 5px;
+  border: 1px solid #333;
+  background: #fff;
+  text-align: center;
+  color: #333;
+}
+
+.ppt-table td:first-child {
+  text-align: left;
+}
+
+.ppt-table tr.alt td {
+  background: #f5f5f5;
+}
+
+.ppt-table .num {
+  font-weight: 700;
+}
+
+.ppt-table .pos {
+  color: #15803d;
+  font-weight: 700;
+}
+
+.ppt-table .neg {
+  color: #dc2626;
+  font-weight: 700;
+}
+
+.ppt-table--metrics th {
+  background: #e8eef4;
+  color: #1e3a5f;
+  border-color: #ccc;
+}
+
+.ppt-table--metrics td {
+  border-color: #ddd;
+}
+
+/* ── Slide 3 KPI cards ── */
+.ppt-kpi-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.ppt-kpi-card {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  background: #f3f4f6;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+
+.ppt-kpi-card--green {
+  background: #ecfdf5;
+}
+
+.ppt-kpi-accent {
+  width: 6px;
+  flex-shrink: 0;
+}
+
+.ppt-kpi-accent--green {
+  background: #15803d;
+}
+
+.ppt-kpi-accent--dark {
+  background: #1a1a1a;
+}
+
+.ppt-kpi-body {
+  padding: 8px 10px;
+  flex: 1;
+}
+
+.ppt-kpi-value {
+  font-size: clamp(16px, 2.2vw, 22px);
+  font-weight: 800;
+  line-height: 1;
+}
+
+.ppt-kpi-value--green {
+  color: #15803d;
+}
+
+.ppt-kpi-value--dark {
+  color: #1a1a1a;
+}
+
+.ppt-kpi-label {
+  font-size: clamp(7px, 0.8vw, 9px);
+  color: #333;
+  margin-top: 4px;
+  line-height: 1.25;
+}
+
+.ppt-kpi-sublabel {
+  font-size: clamp(6px, 0.7vw, 8px);
+  color: #888;
+  font-style: italic;
+}
+
+/* ── Slide 5 KPI + panel ── */
+.ppt-kpi-icons {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.ppt-kpi-icon-card {
+  flex: 1;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.ppt-kpi-icon-circle {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.ppt-kpi-icon-circle--blue {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.ppt-kpi-icon-circle--green {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.ppt-kpi-icon-circle--orange {
+  background: #ffedd5;
+  color: #c2410c;
+}
+
+.ppt-kpi-icon-circle--purple {
+  background: #f3e8ff;
+  color: #7c3aed;
+}
+
+.ppt-kpi-icon-label {
+  font-size: clamp(7px, 0.8vw, 8px);
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.ppt-kpi-icon-value {
+  font-size: clamp(12px, 1.5vw, 16px);
+  font-weight: 800;
+  color: #1e293b;
+}
+
+.ppt-white-panel {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 10px 12px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+
+.ppt-white-panel-title {
+  font-size: clamp(9px, 1.05vw, 11px);
+  font-weight: 700;
+  color: #1e293b;
+  margin: 0 0 8px;
+}
+
+.ppt-tab-pills {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.ppt-tab-pill {
+  font-size: clamp(7px, 0.8vw, 8px);
+  padding: 3px 10px;
+  border-radius: 12px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #64748b;
+}
+
+.ppt-tab-pill--active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+  font-weight: 600;
+}
+
+.ppt-subtitle-muted {
+  font-size: clamp(8px, 0.9vw, 9px);
+  color: #64748b;
+  margin: 0 0 8px;
+}
+
+/* ── Slide 6 metric cards ── */
+.ppt-metric-cards-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 8px;
+  flex-shrink: 0;
+}
+
+.ppt-metric-card {
+  flex: 1;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 10px 12px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+
+.ppt-metric-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 8px;
+}
+
+.ppt-metric-card-head h5 {
+  margin: 0;
+  font-size: clamp(10px, 1.1vw, 12px);
+  font-weight: 700;
+}
+
+.ppt-metric-card-head .tag {
+  font-size: clamp(7px, 0.8vw, 8px);
+  color: #64748b;
+}
+
+.ppt-metric-card-head h5.red {
+  color: #b91c1c;
+}
+
+.ppt-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px 6px;
+}
+
+.ppt-metric-cell .v {
+  font-size: clamp(11px, 1.3vw, 14px);
+  font-weight: 800;
+  color: #1e293b;
+}
+
+.ppt-metric-cell .v.red {
+  color: #b91c1c;
+}
+
+.ppt-metric-cell .l {
+  font-size: clamp(6px, 0.75vw, 8px);
+  color: #64748b;
+}
+
+.ppt-panel-title-sm {
+  font-size: clamp(9px, 1vw, 10px);
+  font-weight: 700;
+  color: #1e293b;
+  margin: 0 0 6px;
+}
+
+/* ── Slide 8 ── */
+.ppt-fl-tag {
+  display: inline-block;
+  background: #b91c1c;
+  color: #fff;
+  font-size: clamp(7px, 0.85vw, 9px);
+  font-weight: 700;
+  padding: 3px 10px;
+  margin-bottom: 8px;
+  letter-spacing: 0.05em;
+}
+
+.ppt-insight-box {
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  padding: 10px 12px;
+  font-size: clamp(7px, 0.85vw, 9px);
+  line-height: 1.5;
+  color: #333;
+  margin-top: auto;
+  flex-shrink: 0;
+}
+
+.ppt-insight-box strong {
+  font-weight: 700;
+}
+
+.ppt-insight-title {
+  font-size: clamp(9px, 1vw, 10px);
+  font-weight: 700;
+  color: #15803d;
+  margin-bottom: 6px;
+}
+
+.ppt-insight-list {
+  margin: 0;
+  padding-left: 14px;
+  color: #555;
+}
+
+/* ── Slide 10 ── */
+.ppt-cols-3 {
+  display: flex;
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+}
+
+.ppt-col-card {
+  flex: 1;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  padding: 10px;
+  font-size: clamp(7px, 0.85vw, 9px);
+  color: #555;
+  line-height: 1.45;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  overflow: hidden;
+}
+
+.ppt-goal-box {
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  padding: 10px 12px;
+  margin-top: 8px;
+  flex-shrink: 0;
+  font-size: clamp(7px, 0.85vw, 9px);
+  color: #555;
+  line-height: 1.45;
+}
+
+.ppt-goal-box .goal-label {
+  font-weight: 700;
+  color: #15803d;
+}
+
+.ppt-header-with-tabs {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  width: 100%;
+}
+
+.ppt-header-with-tabs .ppt-tab-pills {
+  margin: 0;
+}
