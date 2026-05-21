@@ -116,6 +116,7 @@ export const PAGE_TITLES = {
   creatives: 'Creative Analysis',
   events: 'Events / Special Campaigns',
   settings: 'White-Label Settings',
+  'ppt-report': 'PPT Report Download',
   admin: 'Admin Panel',
 };
 

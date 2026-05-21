@@ -34,6 +34,7 @@ export const PLATFORM_PERMISSIONS = [
   { permission_key: 'sidebar.settings', permission_label: 'White-Label Settings', category: 'global' },
   { permission_key: 'sidebar.agency_reports', permission_label: 'Agency Reports', category: 'global' },
   { permission_key: 'sidebar.monthly_reports', permission_label: 'Monthly Reports', category: 'global' },
+  { permission_key: 'sidebar.ppt_report', permission_label: 'PPT Report', category: 'global' },
   { permission_key: 'action.manage_users', permission_label: 'Admin Panel / Manage Users', category: 'global' },
   { permission_key: 'action.admin_clients', permission_label: 'Admin Client Accounts', category: 'global' },
   { permission_key: 'action.admin_roles', permission_label: 'Admin Roles & Permissions', category: 'global' },
