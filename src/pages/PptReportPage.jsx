@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { supabase } from '../lib/supabaseClient';
-import { buildReportDataForSelection } from '../data/reportData';
+import { buildReportDataForSelection, cloneReportServices } from '../data/reportData';
 import { generatePptx } from '../utils/generatePptx';
 import { generatePdf, waitForPaint } from '../utils/generatePdf';
 import { SlidePreviewGrid } from '../components/SlidePreviewGrid';
@@ -54,6 +54,8 @@ export function PptReportPage() {
   const [previewVisible, setPreviewVisible] = useState(false);
   const [generatingFormat, setGeneratingFormat] = useState(null);
   const [pdfExportMount, setPdfExportMount] = useState(false);
+  /** Slide 2 service text — in-memory only, reset when client/month changes */
+  const [slide2Services, setSlide2Services] = useState(null);
   const previewRef = useRef(null);
   const pdfExportRef = useRef(null);
 
@@ -65,27 +67,17 @@ export function PptReportPage() {
     }
     setClientsLoading(true);
     setClientsError(null);
-    // See backups/PptReportPage-loadClients.clients-table.backup.js for previous clients-table query
     const { data, error } = await supabase
-      .from('client_platform_accounts')
-      .select('platform_customer_id, account_name')
+      .from('clients')
+      .select('id, name')
       .eq('agency_id', effectiveAgencyId)
-      .eq('is_active', true)
-      .order('account_name');
+      .order('name');
     if (error) {
-      console.warn('[PptReport] client_platform_accounts error:', error);
+      console.warn('[PptReport] clients error:', error);
       setClientsError(error.message || 'Failed to load clients');
       setClients([]);
     } else {
-      const byCustomerId = new Map();
-      for (const row of data || []) {
-        const id = row.platform_customer_id != null ? String(row.platform_customer_id).trim() : '';
-        if (!id || byCustomerId.has(id)) continue;
-        byCustomerId.set(id, (row.account_name || id).trim());
-      }
-      const list = Array.from(byCustomerId, ([id, name]) => ({ id, name }));
-      list.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
-      setClients(list);
+      setClients(data || []);
     }
     setClientsLoading(false);
   }, [effectiveAgencyId]);
@@ -102,9 +94,31 @@ export function PptReportPage() {
 
   const selectedMonthLabel = MONTH_OPTIONS.find((o) => o.value === selectedMonth)?.label || selectedMonth;
   const selectedClientName = clients.find((c) => c.id === selectedClientId)?.name ?? '';
-  const activeReportData = useMemo(
+
+  const baseReportData = useMemo(
     () => buildReportDataForSelection(selectedClientName, selectedMonthLabel),
     [selectedClientName, selectedMonthLabel],
+  );
+
+  useEffect(() => {
+    setSlide2Services(cloneReportServices(baseReportData.services));
+  }, [baseReportData]);
+
+  const updateSlide2Service = useCallback((index, field, value) => {
+    setSlide2Services((prev) => {
+      if (!prev) return prev;
+      const next = [...prev];
+      next[index] = { ...next[index], [field]: value };
+      return next;
+    });
+  }, []);
+
+  const activeReportData = useMemo(
+    () => ({
+      ...baseReportData,
+      services: slide2Services ?? baseReportData.services,
+    }),
+    [baseReportData, slide2Services],
   );
   const applyDisabled = !selectedClientId || !selectedMonth;
   const downloadsDisabled = !selectedClientId || !selectedMonth;
@@ -263,6 +277,8 @@ export function PptReportPage() {
               clientName={selectedClientName}
               monthLabel={selectedMonthLabel}
               report={activeReportData}
+              slide2Editable
+              updateSlide2Service={updateSlide2Service}
             />
           </div>
         )}

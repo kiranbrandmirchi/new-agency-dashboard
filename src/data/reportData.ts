@@ -161,6 +161,11 @@ export function buildReportDataForSelection(
   };
 }
 
+/** Deep-copy slide 2 service rows for in-session editing (not persisted). */
+export function cloneReportServices(services: ReportData['services']): ReportData['services'] {
+  return services.map((s) => ({ ...s }));
+}
+
 /** Slides 1–10 only */
 export const SLIDE_DEFINITIONS = [
   { num: 1, title: 'Cover — SEO & Digital Marketing Updates', type: 'cover' },

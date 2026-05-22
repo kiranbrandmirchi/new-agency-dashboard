@@ -411,6 +411,28 @@
   line-height: 1.45;
 }
 
+.ppt-service-card-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.ppt-editable-text {
+  cursor: text;
+  border-radius: 2px;
+}
+
+.ppt-editable-text:focus {
+  outline: 2px solid #b91c1c;
+  outline-offset: 1px;
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.ppt-editable-text:empty::before {
+  content: 'Click to edit…';
+  color: #999;
+  font-weight: 400;
+}
+
 /* ── Tables ── */
 .ppt-table-wrap {
   overflow: hidden;

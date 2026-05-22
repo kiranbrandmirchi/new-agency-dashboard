@@ -1,7 +1,6 @@
 /**
- * BACKUP — PPT Report client dropdown query (clients table)
- * Replaced by client_platform_accounts (account_name, platform_customer_id).
- * Date: 2026-05-20
+ * BACKUP — PPT Report client dropdown query (clients table) — ACTIVE
+ * CPA variant archived in PptReportPage-loadClients.client-platform-accounts.backup.js
  */
 export const PPT_REPORT_LOAD_CLIENTS_CLIENTS_TABLE_BACKUP = `
   const { data, error } = await supabase

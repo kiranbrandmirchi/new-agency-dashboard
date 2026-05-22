@@ -1,12 +1,42 @@
-import React, { createContext, useContext } from 'react';
+import React, { useEffect, useLayoutEffect, useRef } from 'react';
 import { reportData } from '../data/reportData';
-
-const ReportPreviewContext = createContext(reportData);
-
-function useReport() {
-  return useContext(ReportPreviewContext);
-}
+import { ReportPreviewContext, useReport, useReportPreview } from './reportPreviewContext';
 import '../styles/pptSlidePreview.css';
+
+function EditableText({ value, onChange, className }) {
+  const ref = useRef(null);
+
+  useLayoutEffect(() => {
+    if (ref.current && ref.current.innerText !== value) {
+      ref.current.innerText = value;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (ref.current && document.activeElement !== ref.current && ref.current.innerText !== value) {
+      ref.current.innerText = value;
+    }
+  }, [value]);
+
+  const commit = (el) => onChange(el.innerText.replace(/\n/g, ' ').trim());
+
+  return (
+    <div
+      ref={ref}
+      className={`${className} ppt-editable-text`}
+      contentEditable
+      suppressContentEditableWarning
+      role="textbox"
+      onBlur={(e) => commit(e.currentTarget)}
+      onInput={(e) => commit(e.currentTarget)}
+      onPaste={(e) => {
+        e.preventDefault();
+        const text = e.clipboardData.getData('text/plain');
+        document.execCommand('insertText', false, text);
+      }}
+    />
+  );
+}
 
 const FOOTER_TEXT = (month) =>
   `Red Castle Services | SEO & Digital Marketing Report | ${month}`;
@@ -75,20 +105,39 @@ function CoverSlide() {
   );
 }
 
-/** Slide 2 */
+/** Slide 2 — service card title/body editable in preview (session only) */
 function ContentSlide2() {
   const report = useReport();
+  const { slide2Editable, updateSlide2Service } = useReportPreview();
+
   return (
     <div className="ppt-slide-inner">
       <RedHeader title="What We Are Managing" right={report.client} />
       <div className="ppt-slide-main">
         <div className="ppt-service-cards">
-          {reportData.services.map((svc) => (
-            <div key={svc.title} className="ppt-service-card">
+          {report.services.map((svc, index) => (
+            <div key={index} className="ppt-service-card">
               <span className="ppt-service-card-icon">{svc.icon}</span>
-              <div>
-                <div className="ppt-service-card-title">{svc.title}</div>
-                <div className="ppt-service-card-body">{svc.body}</div>
+              <div className="ppt-service-card-text">
+                {slide2Editable && updateSlide2Service ? (
+                  <>
+                    <EditableText
+                      className="ppt-service-card-title"
+                      value={svc.title}
+                      onChange={(v) => updateSlide2Service(index, 'title', v)}
+                    />
+                    <EditableText
+                      className="ppt-service-card-body"
+                      value={svc.body}
+                      onChange={(v) => updateSlide2Service(index, 'body', v)}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <div className="ppt-service-card-title">{svc.title}</div>
+                    <div className="ppt-service-card-body">{svc.body}</div>
+                  </>
+                )}
               </div>
             </div>
           ))}
@@ -473,9 +522,22 @@ function renderSlideContent(num) {
   }
 }
 
-export function SlidePreview({ slide, index, exportMode = false, report = reportData }) {
+export function SlidePreview({
+  slide,
+  index,
+  exportMode = false,
+  report = reportData,
+  slide2Editable = false,
+  updateSlide2Service,
+}) {
+  const contextValue = {
+    report,
+    slide2Editable: slide2Editable && !exportMode,
+    updateSlide2Service: slide2Editable && !exportMode ? updateSlide2Service : undefined,
+  };
+
   return (
-    <ReportPreviewContext.Provider value={report}>
+    <ReportPreviewContext.Provider value={contextValue}>
       <div
         className={`ppt-slide-card${exportMode ? ' ppt-slide-card--export' : ''}`}
         style={exportMode ? undefined : { animationDelay: `${index * 80}ms` }}
