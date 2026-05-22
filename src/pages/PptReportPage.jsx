@@ -5,6 +5,10 @@ import { supabase } from '../lib/supabaseClient';
 import { buildReportDataForSelection, cloneReportServices } from '../data/reportData';
 import { generatePptx } from '../utils/generatePptx';
 import { generatePdf, waitForPaint } from '../utils/generatePdf';
+import {
+  emptyPaidAdsOverall,
+  fetchPaidAdsOverallFromGads,
+} from '../utils/fetchPptSlide5GadsData';
 import { SlidePreviewGrid } from '../components/SlidePreviewGrid';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -56,6 +60,10 @@ export function PptReportPage() {
   const [pdfExportMount, setPdfExportMount] = useState(false);
   /** Slide 2 service text — in-memory only, reset when client/month changes */
   const [slide2Services, setSlide2Services] = useState(null);
+  /** Slide 5 — from gads_campaign_daily (session only) */
+  const [paidAdsOverall, setPaidAdsOverall] = useState(null);
+  const [slide5Loading, setSlide5Loading] = useState(false);
+  const [pdfExportReport, setPdfExportReport] = useState(null);
   const previewRef = useRef(null);
   const pdfExportRef = useRef(null);
 
@@ -89,11 +97,34 @@ export function PptReportPage() {
   useEffect(() => {
     if (!selectedClientId) {
       setPreviewVisible(false);
+      setPaidAdsOverall(null);
     }
   }, [selectedClientId]);
 
   const selectedMonthLabel = MONTH_OPTIONS.find((o) => o.value === selectedMonth)?.label || selectedMonth;
   const selectedClientName = clients.find((c) => c.id === selectedClientId)?.name ?? '';
+
+  const loadSlide5GadsData = useCallback(async () => {
+    if (!selectedClientId || !selectedMonth) return null;
+    setSlide5Loading(true);
+    try {
+      const data = await fetchPaidAdsOverallFromGads(
+        selectedClientId,
+        selectedMonth,
+        selectedMonthLabel,
+      );
+      setPaidAdsOverall(data);
+      return data;
+    } catch (err) {
+      console.warn('[PptReport] slide 5 gads_campaign_daily:', err);
+      const fallback = emptyPaidAdsOverall(selectedMonthLabel, selectedMonth);
+      setPaidAdsOverall(fallback);
+      showNotification(err?.message || 'Could not load Google Ads data for slide 5');
+      return fallback;
+    } finally {
+      setSlide5Loading(false);
+    }
+  }, [selectedClientId, selectedMonth, selectedMonthLabel, showNotification]);
 
   const baseReportData = useMemo(
     () => buildReportDataForSelection(selectedClientName, selectedMonthLabel, selectedMonth),
@@ -117,14 +148,29 @@ export function PptReportPage() {
     () => ({
       ...baseReportData,
       services: slide2Services ?? baseReportData.services,
+      paidAdsOverall: paidAdsOverall ?? baseReportData.paidAdsOverall,
     }),
-    [baseReportData, slide2Services],
+    [baseReportData, slide2Services, paidAdsOverall],
   );
-  const applyDisabled = !selectedClientId || !selectedMonth;
-  const downloadsDisabled = !selectedClientId || !selectedMonth;
 
-  const handleApply = () => {
+  const buildExportReportData = useCallback(
+    async () => {
+      const gads = await loadSlide5GadsData();
+      return {
+        ...baseReportData,
+        services: slide2Services ?? baseReportData.services,
+        paidAdsOverall: gads ?? paidAdsOverall ?? baseReportData.paidAdsOverall,
+      };
+    },
+    [baseReportData, slide2Services, paidAdsOverall, loadSlide5GadsData],
+  );
+
+  const applyDisabled = !selectedClientId || !selectedMonth || slide5Loading;
+  const downloadsDisabled = !selectedClientId || !selectedMonth || slide5Loading;
+
+  const handleApply = async () => {
     if (!selectedClientId || !selectedMonth) return;
+    await loadSlide5GadsData();
     setPreviewVisible(true);
     showNotification(`Preview loaded: ${selectedClientName} — ${selectedMonthLabel}`);
     setTimeout(() => previewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
@@ -134,7 +180,8 @@ export function PptReportPage() {
     if (!selectedClientId || !selectedMonth) return;
     setGeneratingFormat('ppt');
     try {
-      await generatePptx(activeReportData, {
+      const exportData = await buildExportReportData();
+      await generatePptx(exportData, {
         clientName: selectedClientName,
         monthLabel: selectedMonthLabel,
       });
@@ -150,8 +197,10 @@ export function PptReportPage() {
   const handleDownloadPdf = async () => {
     if (!selectedClientId || !selectedMonth) return;
     setGeneratingFormat('pdf');
-    setPdfExportMount(true);
     try {
+      const exportData = await buildExportReportData();
+      setPdfExportReport(exportData);
+      setPdfExportMount(true);
       await waitForPaint();
       await sleep(500);
       if (document.fonts?.ready) {
@@ -176,6 +225,7 @@ export function PptReportPage() {
     } finally {
       setGeneratingFormat(null);
       setPdfExportMount(false);
+      setPdfExportReport(null);
     }
   };
 
@@ -242,7 +292,7 @@ export function PptReportPage() {
                     onClick={handleApply}
                     disabled={applyDisabled}
                   >
-                    Apply
+                    {slide5Loading ? 'Loading…' : 'Apply'}
                   </button>
                   <button
                     type="button"
@@ -279,18 +329,19 @@ export function PptReportPage() {
               report={activeReportData}
               slide2Editable
               updateSlide2Service={updateSlide2Service}
+              slide5Loading={slide5Loading}
             />
           </div>
         )}
 
-        {pdfExportMount && selectedClientId && (
+        {pdfExportMount && selectedClientId && pdfExportReport && (
           <div ref={pdfExportRef} className="ppt-pdf-export-root" aria-hidden="true">
             <SlidePreviewGrid
               slidesOnly
               exportMode
               clientName={selectedClientName}
               monthLabel={selectedMonthLabel}
-              report={activeReportData}
+              report={pdfExportReport}
             />
           </div>
         )}

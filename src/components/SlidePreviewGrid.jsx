@@ -11,6 +11,7 @@ export function SlidePreviewGrid({
   exportMode = false,
   slide2Editable = false,
   updateSlide2Service,
+  slide5Loading = false,
 }) {
   const grid = (
     <div className="ppt-preview-grid">
@@ -38,7 +39,11 @@ export function SlidePreviewGrid({
         <h3>
           {clientName} — {monthLabel} Report Preview
         </h3>
-        <p>Slide 2: click text to edit (session only) · slides 1, 4–6: client &amp; month · slide 5: month vs prior month · 7–10: sample</p>
+        <p>
+          Slide 2: editable (session) · slide 5 KPIs: current calendar month · table: selected vs prior month
+          {slide5Loading ? ' · loading slide 5…' : ''}
+          {' · '}slides 1, 4–6: client &amp; month · 7–10: sample
+        </p>
       </div>
       {grid}
     </section>
