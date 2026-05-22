@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabaseClient';
+import { buildQuery, sbFetchAllParallel } from '../lib/supabaseRest';
 import type { ReportData } from '../data/reportData';
 import {
   buildPaidAdsComparisonSubtitle,
@@ -18,13 +19,20 @@ function num(v: unknown): number {
   return Number(v) || 0;
 }
 
+/** Local calendar date YYYY-MM-DD (avoids UTC shift from toISOString()). */
+function formatLocalDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 /** Real-world current calendar month (for top KPI cards — not tied to dropdown). */
 export function getCalendarCurrentMonthRange() {
   const now = new Date();
   const first = new Date(now.getFullYear(), now.getMonth(), 1);
   const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-  const fmt = (d: Date) => d.toISOString().slice(0, 10);
-  return { from: fmt(first), to: fmt(last) };
+  return { from: formatLocalDate(first), to: formatLocalDate(last) };
 }
 
 /** Calendar month bounds from dropdown value `YYYY-MM-01`. */
@@ -39,25 +47,119 @@ export function getMonthDateRange(monthValue: string) {
   const last = new Date(year, monthIndex + 1, 0);
   const prevFirst = new Date(year, monthIndex - 1, 1);
   const prevLast = new Date(year, monthIndex, 0);
-  const fmt = (d: Date) => d.toISOString().slice(0, 10);
   return {
-    currentFrom: fmt(first),
-    currentTo: fmt(last),
-    prevFrom: fmt(prevFirst),
-    prevTo: fmt(prevLast),
+    currentFrom: formatLocalDate(first),
+    currentTo: formatLocalDate(last),
+    prevFrom: formatLocalDate(prevFirst),
+    prevTo: formatLocalDate(prevLast),
   };
 }
 
-/** Google Ads customer_id variants (with/without dashes) for matching gads_campaign_daily. */
-function expandCustomerIdVariants(id: string): string[] {
-  const s = String(id).trim();
-  if (!s) return [];
-  const noDash = s.replace(/-/g, '');
-  const variants = new Set<string>([s, noDash]);
-  if (noDash.length === 10) {
-    variants.add(`${noDash.slice(0, 3)}-${noDash.slice(3, 6)}-${noDash.slice(6)}`);
+const GOOGLE_ADS_PLATFORM = 'google_ads';
+
+function normalizeCustomerId(id: unknown): string {
+  return String(id ?? '').replace(/-/g, '');
+}
+
+type GadsCampaignRow = {
+  customer_id?: unknown;
+  campaign_id?: unknown;
+  date?: unknown;
+  cost?: unknown;
+  clicks?: unknown;
+  conversions?: unknown;
+};
+
+/**
+ * One row per (normalized customer, date, campaign) — matches SQL aggregation when
+ * the same campaign was synced under dashed and undashed customer_id values.
+ */
+function dedupeCampaignRows(rows: GadsCampaignRow[], allowedNormalized: Set<string>): GadsCampaignRow[] {
+  const byKey = new Map<string, GadsCampaignRow>();
+  for (const row of rows) {
+    const norm = normalizeCustomerId(row.customer_id);
+    if (!allowedNormalized.has(norm)) continue;
+    const key = `${norm}|${row.date}|${row.campaign_id}`;
+    if (!byKey.has(key)) byKey.set(key, row);
   }
-  return [...variants];
+  return [...byKey.values()];
+}
+
+/**
+ * clients.id → client_platform_accounts.client_id (platform = google_ads)
+ * → platform_customer_id used as gads_campaign_daily.customer_id
+ */
+async function resolveGoogleAdsCustomerIdsForClient(
+  clientId: string,
+  agencyId?: string | null,
+): Promise<string[]> {
+  const { data: client, error: clientError } = await supabase
+    .from('clients')
+    .select('id, agency_id')
+    .eq('id', clientId)
+    .maybeSingle();
+
+  if (clientError) {
+    throw new Error(clientError.message || 'Failed to load client');
+  }
+  if (!client) {
+    throw new Error('Client not found');
+  }
+  if (agencyId && client.agency_id !== agencyId) {
+    throw new Error('Client does not belong to the selected agency');
+  }
+
+  let cpaQuery = supabase
+    .from('client_platform_accounts')
+    .select('platform_customer_id')
+    .eq('client_id', client.id)
+    .eq('platform', GOOGLE_ADS_PLATFORM);
+
+  if (client.agency_id) {
+    cpaQuery = cpaQuery.eq('agency_id', client.agency_id);
+  }
+
+  const { data: accounts, error: cpaError } = await cpaQuery;
+
+  if (cpaError) {
+    throw new Error(cpaError.message || 'Failed to load Google Ads accounts for client');
+  }
+
+  const platformCustomerIds = [
+    ...new Set(
+      (accounts || [])
+        .map((a) => String(a.platform_customer_id ?? '').trim())
+        .filter(Boolean),
+    ),
+  ];
+
+  if (!platformCustomerIds.length) {
+    throw new Error(
+      'No Google Ads account linked to this client. Link a client_platform_accounts row with client_id and platform=google_ads.',
+    );
+  }
+
+  return platformCustomerIds;
+}
+
+async function fetchGadsCampaignTotals(
+  platformCustomerIds: string[],
+  from: string,
+  to: string,
+): Promise<CampaignTotals> {
+  const allowedNormalized = new Set(
+    platformCustomerIds.map(normalizeCustomerId).filter(Boolean),
+  );
+
+  const endpoint = buildQuery('gads_campaign_daily', {
+    customerIds: platformCustomerIds,
+    dateFrom: from,
+    dateTo: to,
+  });
+
+  const rows = (await sbFetchAllParallel(endpoint)) as GadsCampaignRow[];
+  const deduped = dedupeCampaignRows(rows, allowedNormalized);
+  return sumCampaignRows(deduped);
 }
 
 function sumCampaignRows(rows: { cost?: unknown; clicks?: unknown; conversions?: unknown }[]): CampaignTotals {
@@ -167,35 +269,16 @@ function buildPaidAdsOverallFromTotals(
 }
 
 /**
- * clients.id → client_platform_accounts (google_ads) → gads_campaign_daily
+ * clients.id → client_platform_accounts.client_id (platform = google_ads)
+ * → gads_campaign_daily.customer_id (= platform_customer_id)
  */
 export async function fetchPaidAdsOverallFromGads(
   clientId: string,
   monthValue: string,
   monthLabel: string,
+  agencyId?: string | null,
 ): Promise<PaidAdsOverallData> {
-  const { data: accounts, error: cpaError } = await supabase
-    .from('client_platform_accounts')
-    .select('platform_customer_id')
-    .eq('client_id', clientId)
-    .eq('platform', 'google_ads')
-    .eq('is_active', true);
-
-  if (cpaError) {
-    throw new Error(cpaError.message || 'Failed to load Google Ads accounts for client');
-  }
-
-  const customerIds = [
-    ...new Set(
-      (accounts || []).flatMap((a) =>
-        expandCustomerIdVariants(String(a.platform_customer_id ?? '')),
-      ),
-    ),
-  ].filter(Boolean);
-
-  if (!customerIds.length) {
-    throw new Error('No active Google Ads account linked to this client');
-  }
+  const platformCustomerIds = await resolveGoogleAdsCustomerIdsForClient(clientId, agencyId);
 
   const calendarRange = getCalendarCurrentMonthRange();
   const { currentFrom, currentTo, prevFrom, prevTo } = getMonthDateRange(monthValue);
@@ -203,33 +286,11 @@ export async function fetchPaidAdsOverallFromGads(
     throw new Error('Invalid month selection');
   }
 
-  const query = (from: string, to: string) =>
-    supabase
-      .from('gads_campaign_daily')
-      .select('cost, clicks, conversions')
-      .in('customer_id', customerIds)
-      .gte('date', from)
-      .lte('date', to);
-
-  const [topStatsRes, selectedRes, previousRes] = await Promise.all([
-    query(calendarRange.from, calendarRange.to),
-    query(currentFrom, currentTo),
-    query(prevFrom, prevTo),
+  const [topStatsTotals, tableCurrent, tablePrevious] = await Promise.all([
+    fetchGadsCampaignTotals(platformCustomerIds, calendarRange.from, calendarRange.to),
+    fetchGadsCampaignTotals(platformCustomerIds, currentFrom, currentTo),
+    fetchGadsCampaignTotals(platformCustomerIds, prevFrom, prevTo),
   ]);
-
-  if (topStatsRes.error) {
-    throw new Error(topStatsRes.error.message || 'Failed to load Google Ads KPI data');
-  }
-  if (selectedRes.error) {
-    throw new Error(selectedRes.error.message || 'Failed to load selected month Google Ads data');
-  }
-  if (previousRes.error) {
-    throw new Error(previousRes.error.message || 'Failed to load previous month Google Ads data');
-  }
-
-  const topStatsTotals = sumCampaignRows(topStatsRes.data || []);
-  const tableCurrent = sumCampaignRows(selectedRes.data || []);
-  const tablePrevious = sumCampaignRows(previousRes.data || []);
 
   return buildPaidAdsOverallFromTotals(
     topStatsTotals,
@@ -242,10 +303,6 @@ export async function fetchPaidAdsOverallFromGads(
 
 /** Empty slide 5 metrics when fetch fails or no data. */
 export function emptyPaidAdsOverall(monthLabel: string, monthValue: string): PaidAdsOverallData {
-  return buildPaidAdsOverallFromTotals(
-    { cost: 0, clicks: 0, conversions: 0 },
-    { cost: 0, clicks: 0, conversions: 0 },
-    monthLabel,
-    monthValue,
-  );
+  const zero = { cost: 0, clicks: 0, conversions: 0 };
+  return buildPaidAdsOverallFromTotals(zero, zero, zero, monthLabel, monthValue);
 }

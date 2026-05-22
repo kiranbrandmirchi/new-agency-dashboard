@@ -97,9 +97,9 @@ export function PptReportPage() {
   useEffect(() => {
     if (!selectedClientId) {
       setPreviewVisible(false);
-      setPaidAdsOverall(null);
     }
-  }, [selectedClientId]);
+    setPaidAdsOverall(null);
+  }, [selectedClientId, selectedMonth]);
 
   const selectedMonthLabel = MONTH_OPTIONS.find((o) => o.value === selectedMonth)?.label || selectedMonth;
   const selectedClientName = clients.find((c) => c.id === selectedClientId)?.name ?? '';
@@ -112,6 +112,7 @@ export function PptReportPage() {
         selectedClientId,
         selectedMonth,
         selectedMonthLabel,
+        effectiveAgencyId,
       );
       setPaidAdsOverall(data);
       return data;
@@ -124,7 +125,7 @@ export function PptReportPage() {
     } finally {
       setSlide5Loading(false);
     }
-  }, [selectedClientId, selectedMonth, selectedMonthLabel, showNotification]);
+  }, [selectedClientId, selectedMonth, selectedMonthLabel, effectiveAgencyId, showNotification]);
 
   const baseReportData = useMemo(
     () => buildReportDataForSelection(selectedClientName, selectedMonthLabel, selectedMonth),
