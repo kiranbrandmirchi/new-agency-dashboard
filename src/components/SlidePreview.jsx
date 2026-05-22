@@ -237,9 +237,9 @@ function PaidAdsOverallSlide() {
     <div className="ppt-slide-inner">
       <RedHeader title="Paid Ads Performance" right={report.client} />
       <div className="ppt-slide-main">
-        <p className="ppt-subtitle-muted">March 2026 vs February 2026 cost and conversion analysis</p>
+        <p className="ppt-subtitle-muted">{report.paidAdsOverall.comparisonSubtitle}</p>
         <div className="ppt-kpi-icons">
-          {reportData.paidAdsOverall.topStats.map((s, i) => (
+          {report.paidAdsOverall.topStats.map((s, i) => (
             <div key={s.label} className="ppt-kpi-icon-card">
               <div className={`ppt-kpi-icon-circle ${circleClass[i]}`}>{icons[i]}</div>
               <div>
@@ -253,8 +253,8 @@ function PaidAdsOverallSlide() {
           <div className="ppt-header-with-tabs">
             <div className="ppt-white-panel-title">Detailed Cost &amp; Performance Breakdown</div>
             <div className="ppt-tab-pills">
-              <span className="ppt-tab-pill ppt-tab-pill--active">April 2026</span>
-              <span className="ppt-tab-pill">March 2026</span>
+              <span className="ppt-tab-pill ppt-tab-pill--active">{report.paidAdsOverall.currentMonthLabel}</span>
+              <span className="ppt-tab-pill">{report.paidAdsOverall.previousMonthLabel}</span>
               <span className="ppt-tab-pill">Compare</span>
             </div>
           </div>
@@ -263,13 +263,13 @@ function PaidAdsOverallSlide() {
               <thead>
                 <tr>
                   <th>Metric</th>
-                  <th>April 2026</th>
-                  <th>March 2026</th>
+                  <th>{report.paidAdsOverall.currentMonthLabel}</th>
+                  <th>{report.paidAdsOverall.previousMonthLabel}</th>
                   <th>Change</th>
                 </tr>
               </thead>
               <tbody>
-                {reportData.paidAdsOverall.table.map((row) => (
+                {report.paidAdsOverall.table.map((row) => (
                   <tr key={row.metric}>
                     <td>{row.metric}</td>
                     <td>{row.current}</td>

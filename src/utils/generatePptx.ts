@@ -402,7 +402,7 @@ function addPaidAdsOverallSlide(pptx: PptxGenJS, data: ReportData) {
   redHeader(slide, 'Paid Ads Performance', data.client);
   contentBackground(slide);
   const y0 = MAIN_Y + 0.12;
-  slide.addText('March 2026 vs February 2026 cost and conversion analysis', {
+  slide.addText(data.paidAdsOverall.comparisonSubtitle, {
     x: 0.35,
     y: y0,
     w: 9,
@@ -433,16 +433,17 @@ function addPaidAdsOverallSlide(pptx: PptxGenJS, data: ReportData) {
     bold: true,
     color: C.navy,
   });
+  const { currentMonthLabel, previousMonthLabel } = data.paidAdsOverall;
   const pillY = panelY + 0.08;
   slide.addShape('rect', { x: 7.0, y: pillY, w: 1.05, h: 0.28, fill: { color: C.tabBlue } });
-  slide.addText('April 2026', { x: 7.0, y: pillY + 0.04, w: 1.05, h: 0.22, fontSize: 7, color: C.white, align: 'center' });
+  slide.addText(currentMonthLabel, { x: 7.0, y: pillY + 0.04, w: 1.05, h: 0.22, fontSize: 7, color: C.white, align: 'center' });
   slide.addShape('rect', { x: 8.1, y: pillY, w: 1.05, h: 0.28, fill: { color: C.white }, line: { color: 'D1D5DB', width: 0.5 } });
-  slide.addText('March 2026', { x: 8.1, y: pillY + 0.04, w: 1.05, h: 0.22, fontSize: 7, color: C.slate, align: 'center' });
+  slide.addText(previousMonthLabel, { x: 8.1, y: pillY + 0.04, w: 1.05, h: 0.22, fontSize: 7, color: C.slate, align: 'center' });
   const tableRows = [
     [
       { text: 'Metric', options: th },
-      { text: 'April 2026', options: th },
-      { text: 'March 2026', options: th },
+      { text: currentMonthLabel, options: th },
+      { text: previousMonthLabel, options: th },
       { text: 'Change', options: th },
     ],
     ...data.paidAdsOverall.table.map((row) => [

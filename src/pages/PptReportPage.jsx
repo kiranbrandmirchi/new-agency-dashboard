@@ -96,8 +96,8 @@ export function PptReportPage() {
   const selectedClientName = clients.find((c) => c.id === selectedClientId)?.name ?? '';
 
   const baseReportData = useMemo(
-    () => buildReportDataForSelection(selectedClientName, selectedMonthLabel),
-    [selectedClientName, selectedMonthLabel],
+    () => buildReportDataForSelection(selectedClientName, selectedMonthLabel, selectedMonth),
+    [selectedClientName, selectedMonthLabel, selectedMonth],
   );
 
   useEffect(() => {

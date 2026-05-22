@@ -53,6 +53,9 @@ export const reportData = {
   },
 
   paidAdsOverall: {
+    comparisonSubtitle: 'March 2026 vs February 2026 cost and conversion analysis',
+    currentMonthLabel: 'April 2026',
+    previousMonthLabel: 'March 2026',
     topStats: [
       { label: 'Total Cost', value: '$7,267.13' },
       { label: 'Total Clicks', value: '2,558' },
@@ -145,11 +148,41 @@ export const reportData = {
 
 export type ReportData = typeof reportData;
 
+/** e.g. "2026-04-01" → "April 2026" */
+export function formatMonthYearLabel(year: number, monthIndex0: number): string {
+  return new Date(year, monthIndex0, 1).toLocaleDateString('en-US', {
+    month: 'long',
+    year: 'numeric',
+  });
+}
+
+/** Previous calendar month from month dropdown value (`YYYY-MM-01`). */
+export function getPreviousMonthLabel(monthValue: string): string {
+  const match = monthValue.match(/^(\d{4})-(\d{2})/);
+  if (!match) return '';
+  const year = Number(match[1]);
+  const monthIndex = Number(match[2]) - 1;
+  return formatMonthYearLabel(year, monthIndex - 1);
+}
+
+export function buildPaidAdsComparisonSubtitle(
+  currentMonthLabel: string,
+  previousMonthLabel: string,
+): string {
+  return `${currentMonthLabel} vs ${previousMonthLabel} cost and conversion analysis`;
+}
+
 /** Merge UI selections into the report payload (slides 1–6 client/month fields, footers, etc.) */
 export function buildReportDataForSelection(
   clientName: string,
   monthLabel: string,
+  monthValue: string,
 ): ReportData {
+  const previousMonthLabel = getPreviousMonthLabel(monthValue);
+  const comparisonSubtitle = previousMonthLabel
+    ? buildPaidAdsComparisonSubtitle(monthLabel, previousMonthLabel)
+    : reportData.paidAdsOverall.comparisonSubtitle;
+
   return {
     ...reportData,
     client: clientName,
@@ -157,6 +190,12 @@ export function buildReportDataForSelection(
     sectionDivider: {
       ...reportData.sectionDivider,
       subtitle: `Paid Ads Performance — ${monthLabel}`,
+    },
+    paidAdsOverall: {
+      ...reportData.paidAdsOverall,
+      comparisonSubtitle,
+      currentMonthLabel: monthLabel,
+      previousMonthLabel,
     },
   };
 }
