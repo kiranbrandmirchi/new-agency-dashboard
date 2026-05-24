@@ -89,7 +89,7 @@ function dedupeCampaignRows(rows: GadsCampaignRow[], allowedNormalized: Set<stri
  * clients.id → client_platform_accounts.client_id (platform = google_ads)
  * → platform_customer_id used as gads_campaign_daily.customer_id
  */
-async function resolveGoogleAdsCustomerIdsForClient(
+export async function resolveGoogleAdsCustomerIdsForClient(
   clientId: string,
   agencyId?: string | null,
 ): Promise<string[]> {
@@ -142,7 +142,7 @@ async function resolveGoogleAdsCustomerIdsForClient(
   return platformCustomerIds;
 }
 
-async function fetchGadsCampaignTotals(
+export async function fetchGadsCampaignTotals(
   platformCustomerIds: string[],
   from: string,
   to: string,

@@ -63,12 +63,35 @@ function RedSubBar({ children }) {
   return <div className="ppt-red-bar ppt-red-bar--sub">{children}</div>;
 }
 
+/** Editable green insight box (slides 1, 2, 3, 5, 6, 7) */
+function SlideBottomInsight({ slideNum }) {
+  const report = useReport();
+  const { slideBottomInsightEditable, updateSlideBottomInsight } = useReportPreview();
+  const key = String(slideNum);
+  const text = report.slideBottomInsights?.[key] ?? '';
+
+  return (
+    <div className="ppt-insight-box ppt-slide-bottom-insight">
+      {slideBottomInsightEditable && updateSlideBottomInsight ? (
+        <EditableText
+          className="ppt-insight-editable"
+          value={text}
+          onChange={(v) => updateSlideBottomInsight(slideNum, v)}
+        />
+      ) : (
+        <div className="ppt-insight-text">{text || '\u00a0'}</div>
+      )}
+    </div>
+  );
+}
+
 /** Slide 1 — client name + report month from UI selections */
 function CoverSlide() {
   const report = useReport();
   return (
     <div className="ppt-slide-inner ppt-cover">
-      <div className="ppt-cover-left">
+      <div className="ppt-cover-body">
+        <div className="ppt-cover-left">
         <div className="ppt-cover-services">SERVICES</div>
         <div className="ppt-cover-rule" />
         <div className="ppt-cover-month">{report.month}</div>
@@ -101,6 +124,8 @@ function CoverSlide() {
           Prepared by {report.preparedBy} | {report.website}
         </p>
       </div>
+      </div>
+      <SlideBottomInsight slideNum={1} />
     </div>
   );
 }
@@ -113,7 +138,7 @@ function ContentSlide2() {
   return (
     <div className="ppt-slide-inner">
       <RedHeader title="What We Are Managing" right={report.client} />
-      <div className="ppt-slide-main">
+      <div className="ppt-slide-main ppt-slide-main--with-insight">
         <div className="ppt-service-cards">
           {report.services.map((svc, index) => (
             <div key={index} className="ppt-service-card">
@@ -142,68 +167,108 @@ function ContentSlide2() {
             </div>
           ))}
         </div>
+        <SlideBottomInsight slideNum={2} />
       </div>
       <RedFooter />
     </div>
   );
 }
 
-/** Slide 3 */
+/** Slide 3 — location + lead counts editable in preview (session only) */
 function LeadSummarySlide() {
-  const r = reportData.leadSummary.tableRow;
-  const boxes = reportData.leadSummary.statBoxes;
+  const report = useReport();
+  const { slide3Editable, updateSlide3TableRow, updateSlide3StatBox } = useReportPreview();
+  const r = report.leadSummary.tableRow;
+  const boxes = report.leadSummary.statBoxes;
+
+  const renderTableCell = (field, className = '') => {
+    const display = String(r[field] ?? '');
+    if (slide3Editable && updateSlide3TableRow) {
+      return (
+        <EditableText
+          className={`ppt-table-editable ${className}`.trim()}
+          value={display}
+          onChange={(v) => updateSlide3TableRow(field, v)}
+        />
+      );
+    }
+    return display;
+  };
+
+  const renderStatValue = (index, box, valueClass) => {
+    if (slide3Editable && updateSlide3StatBox) {
+      return (
+        <EditableText
+          className={`ppt-kpi-value ${valueClass} ppt-kpi-editable-value`}
+          value={box.value}
+          onChange={(v) => updateSlide3StatBox(index, v)}
+        />
+      );
+    }
+    return <div className={`ppt-kpi-value ${valueClass}`}>{box.value}</div>;
+  };
+
   return (
     <div className="ppt-slide-inner">
-      <RedHeader title="Overall Performance Overview – Lead Summary" right="April Vs March 2026" />
-      <div className="ppt-slide-main ppt-slide-main--flush" style={{ padding: '10px 14px' }}>
+      <RedHeader
+        title="Overall Performance Overview – Lead Summary"
+        right={report.leadSummary.comparisonHeader}
+      />
+      <div className="ppt-slide-main ppt-slide-main--flush ppt-slide-main--with-insight" style={{ padding: '10px 14px' }}>
         <div className="ppt-table-wrap">
           <table className="ppt-table">
             <thead>
               <tr>
                 <th>Location</th>
-                <th>Call Leads (April)</th>
-                <th>Contact Forms (April)</th>
-                <th>Chat Widgets (April)</th>
-                <th>Call Leads (Mar)</th>
-                <th>Contact Forms(Mar)</th>
-                <th>Chat Widgets (Mar)</th>
+                <th>Call Leads ({report.leadSummary.currentMonthName})</th>
+                <th>Contact Forms ({report.leadSummary.currentMonthName})</th>
+                <th>Chat Widgets ({report.leadSummary.currentMonthName})</th>
+                <th>Call Leads ({report.leadSummary.previousMonthName})</th>
+                <th>Contact Forms ({report.leadSummary.previousMonthName})</th>
+                <th>Chat Widgets ({report.leadSummary.previousMonthName})</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td>{r.location}</td>
-                <td className="num">{r.callApril}</td>
-                <td>{r.formsApril}</td>
-                <td>{r.chatApril}</td>
-                <td>{r.callMar}</td>
-                <td>{r.formsMar}</td>
-                <td>{r.chatMar}</td>
+                <td>{renderTableCell('location')}</td>
+                <td className="num">{renderTableCell('callApril', 'num')}</td>
+                <td>{renderTableCell('formsApril')}</td>
+                <td>{renderTableCell('chatApril')}</td>
+                <td>{renderTableCell('callMar')}</td>
+                <td>{renderTableCell('formsMar')}</td>
+                <td>{renderTableCell('chatMar')}</td>
               </tr>
             </tbody>
           </table>
         </div>
-        <RedSubBar>Combined Totals – March 2026</RedSubBar>
+        <RedSubBar>{report.leadSummary.combinedTotalsLabel}</RedSubBar>
         <div className="ppt-kpi-row">
-          <div className="ppt-kpi-card ppt-kpi-card--green">
-            <div className="ppt-kpi-accent ppt-kpi-accent--green" />
-            <div className="ppt-kpi-body">
-              <div className="ppt-kpi-value ppt-kpi-value--green">{boxes[0].value}</div>
-              <div className="ppt-kpi-label">{boxes[0].label}</div>
-            </div>
-          </div>
-          {boxes.slice(1).map((box) => (
-            <div key={box.label} className="ppt-kpi-card">
-              <div className="ppt-kpi-accent ppt-kpi-accent--dark" />
-              <div className="ppt-kpi-body">
-                <div className="ppt-kpi-value ppt-kpi-value--dark">{box.value}</div>
-                <div className="ppt-kpi-label">{box.label}</div>
-                {box.label.includes('(Mar)') && (
-                  <div className="ppt-kpi-sublabel">Previous month</div>
-                )}
+          {boxes.map((box, index) => {
+            const isGreen = index === 0;
+            return (
+              <div
+                key={index}
+                className={isGreen ? 'ppt-kpi-card ppt-kpi-card--green' : 'ppt-kpi-card'}
+              >
+                <div
+                  className={`ppt-kpi-accent ${isGreen ? 'ppt-kpi-accent--green' : 'ppt-kpi-accent--dark'}`}
+                />
+                <div className="ppt-kpi-body">
+                  {renderStatValue(
+                    index,
+                    box,
+                    isGreen ? 'ppt-kpi-value--green' : 'ppt-kpi-value--dark',
+                  )}
+                  <div className="ppt-kpi-label">{box.label}</div>
+                  {box.isPreviousMonth && (
+                    <div className="ppt-kpi-sublabel">Previous month</div>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
+        <SlideBottomInsight slideNum={3} />
       </div>
       <RedFooter />
     </div>
@@ -236,7 +301,7 @@ function PaidAdsOverallSlide() {
   return (
     <div className="ppt-slide-inner">
       <RedHeader title="Paid Ads Performance" right={report.client} />
-      <div className="ppt-slide-main">
+      <div className="ppt-slide-main ppt-slide-main--with-insight">
         <p className="ppt-subtitle-muted">{report.paidAdsOverall.comparisonSubtitle}</p>
         <div className="ppt-kpi-icons">
           {report.paidAdsOverall.topStats.map((s, i) => (
@@ -281,6 +346,7 @@ function PaidAdsOverallSlide() {
             </table>
           </div>
         </div>
+        <SlideBottomInsight slideNum={5} />
       </div>
       <RedFooter />
     </div>
@@ -321,7 +387,7 @@ function PaidAdsFloridaSlide() {
   return (
     <div className="ppt-slide-inner">
       <RedHeader title="Performance Overview" right={report.client} />
-      <div className="ppt-slide-main">
+      <div className="ppt-slide-main ppt-slide-main--with-insight">
         <div className="ppt-metric-cards-row">
           <MetricCard panel={d.current} titleColor="red" />
           <MetricCard panel={d.previous} titleColor="" />
@@ -333,8 +399,8 @@ function PaidAdsFloridaSlide() {
               <thead>
                 <tr>
                   <th>Metric</th>
-                  <th>April 2026</th>
-                  <th>March 2026</th>
+                  <th>{d.currentMonthLabel}</th>
+                  <th>{d.previousMonthLabel}</th>
                   <th>Change</th>
                   <th>Status</th>
                 </tr>
@@ -353,6 +419,7 @@ function PaidAdsFloridaSlide() {
             </table>
           </div>
         </div>
+        <SlideBottomInsight slideNum={6} />
       </div>
       <RedFooter />
     </div>
@@ -364,7 +431,7 @@ function SearchOverviewSlide() {
   return (
     <div className="ppt-slide-inner">
       <RedHeader title="Search Overview – Florida" right="GA4 Analytics" />
-      <div className="ppt-slide-main ppt-slide-main--flush" style={{ padding: '12px 14px' }}>
+      <div className="ppt-slide-main ppt-slide-main--flush ppt-slide-main--with-insight" style={{ padding: '12px 14px' }}>
         <div className="ppt-table-wrap" style={{ flex: 1, margin: 0 }}>
           <table className="ppt-table">
             <thead>
@@ -391,6 +458,7 @@ function SearchOverviewSlide() {
             </tbody>
           </table>
         </div>
+        <SlideBottomInsight slideNum={7} />
       </div>
       <RedFooter />
     </div>
@@ -529,11 +597,22 @@ export function SlidePreview({
   report = reportData,
   slide2Editable = false,
   updateSlide2Service,
+  slide3Editable = false,
+  updateSlide3TableRow,
+  updateSlide3StatBox,
+  slideBottomInsightEditable = false,
+  updateSlideBottomInsight,
 }) {
   const contextValue = {
     report,
     slide2Editable: slide2Editable && !exportMode,
     updateSlide2Service: slide2Editable && !exportMode ? updateSlide2Service : undefined,
+    slide3Editable: slide3Editable && !exportMode,
+    updateSlide3TableRow: slide3Editable && !exportMode ? updateSlide3TableRow : undefined,
+    updateSlide3StatBox: slide3Editable && !exportMode ? updateSlide3StatBox : undefined,
+    slideBottomInsightEditable: slideBottomInsightEditable && !exportMode,
+    updateSlideBottomInsight:
+      slideBottomInsightEditable && !exportMode ? updateSlideBottomInsight : undefined,
   };
 
   return (

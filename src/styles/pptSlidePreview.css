@@ -191,11 +191,51 @@
   padding: 0;
 }
 
+.ppt-slide-main--with-insight {
+  gap: 8px;
+}
+
+.ppt-slide-bottom-insight {
+  margin-top: auto;
+}
+
+.ppt-insight-editable {
+  display: block;
+  min-width: 1em;
+  outline: none;
+  color: #555;
+  line-height: 1.5;
+}
+
+.ppt-insight-text {
+  color: #555;
+  line-height: 1.5;
+}
+
+.ppt-insight-editable:empty::before {
+  content: 'Click to add insight notes…';
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.ppt-slide-inner.ppt-cover .ppt-slide-bottom-insight {
+  margin: 0 14px 10px;
+  background: #f0fdf4;
+}
+
 /* ── Slide 1 Cover (full-height 34% red | 66% dark split) ── */
 .ppt-slide-inner.ppt-cover {
-  flex-direction: row;
+  flex-direction: column;
   align-items: stretch;
   background: #1a1a1a;
+}
+
+.ppt-cover-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
 }
 
 .ppt-cover-left {
@@ -433,6 +473,17 @@
   font-weight: 400;
 }
 
+.ppt-table td .ppt-table-editable {
+  display: block;
+  min-height: 1.1em;
+  padding: 1px 2px;
+}
+
+.ppt-table td .ppt-table-editable.num {
+  text-align: center;
+  font-weight: 700;
+}
+
 /* ── Tables ── */
 .ppt-table-wrap {
   overflow: hidden;
@@ -549,6 +600,11 @@
 
 .ppt-kpi-value--dark {
   color: #1a1a1a;
+}
+
+.ppt-kpi-editable-value {
+  text-align: center;
+  min-width: 2ch;
 }
 
 .ppt-kpi-label {
