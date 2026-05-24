@@ -48,6 +48,9 @@ const FOOTER_H = 0.21;
 const MAIN_Y = HEADER_H;
 const MAIN_H = SLIDE_H - HEADER_H - FOOTER_H;
 const FOOTER_Y = SLIDE_H - FOOTER_H;
+const BOTTOM_INSIGHT_H = 1.2;
+const BOTTOM_INSIGHT_Y = FOOTER_Y - BOTTOM_INSIGHT_H - 0.08;
+const COVER_BOTTOM_INSIGHT_Y = SLIDE_H - BOTTOM_INSIGHT_H - 0.15;
 
 type PptxSlide = ReturnType<PptxGenJS['addSlide']>;
 
@@ -120,7 +123,14 @@ function contentBackground(slide: PptxSlide) {
   });
 }
 
-function addInsightBox(slide: PptxSlide, y: number, title: string | null, bullets: string[]) {
+function addInsightBox(
+  slide: PptxSlide,
+  y: number,
+  title: string | null,
+  bullets: string[],
+  options: { bulleted?: boolean } = {},
+) {
+  const { bulleted = true } = options;
   const h = title ? 1.35 : 1.2;
   slide.addShape('rect', {
     x: 0.35,
@@ -144,7 +154,7 @@ function addInsightBox(slide: PptxSlide, y: number, title: string | null, bullet
     ty += 0.28;
   }
   bullets.forEach((text, i) => {
-    slide.addText(`• ${text}`, {
+    slide.addText(bulleted ? `• ${text}` : text, {
       x: 0.5,
       y: ty + i * 0.42,
       w: 9,
@@ -154,6 +164,15 @@ function addInsightBox(slide: PptxSlide, y: number, title: string | null, bullet
       lineSpacing: 12,
     });
   });
+}
+
+function getSlideBottomInsight(data: ReportData, slideNum: number): string {
+  return data.slideBottomInsights?.[String(slideNum)]?.trim() ?? '';
+}
+
+function addSlideBottomInsight(slide: PptxSlide, data: ReportData, slideNum: number, y = BOTTOM_INSIGHT_Y) {
+  const text = getSlideBottomInsight(data, slideNum);
+  if (text) addInsightBox(slide, y, null, [text], { bulleted: false });
 }
 
 /** Slide 1 — Cover (34% red | 66% dark, matches preview layout) */
@@ -270,6 +289,7 @@ function addCoverSlide(pptx: PptxGenJS, data: ReportData, logoDataUrl: string | 
     fontSize: 9,
     color: '999999',
   });
+  addSlideBottomInsight(slide, data, 1, COVER_BOTTOM_INSIGHT_Y);
 }
 
 /** Slide 2 — What We Are Managing */
@@ -288,24 +308,27 @@ function addContentSlide2(pptx: PptxGenJS, data: ReportData) {
     slide.addText(svc.title, { x: 1.05, y: y + 0.15, w: 8.4, h: 0.3, fontSize: 12, bold: true, color: C.darkGray });
     slide.addText(svc.body, { x: 1.05, y: y + 0.48, w: 8.4, h: 0.75, fontSize: 10, color: C.slate, lineSpacing: 14 });
   });
+  addSlideBottomInsight(slide, data, 2);
   redFooter(slide, data.month);
 }
 
 /** Slide 3 — Lead Summary */
 function addLeadSummarySlide(pptx: PptxGenJS, data: ReportData) {
   const slide = pptx.addSlide();
-  redHeader(slide, 'Overall Performance Overview – Lead Summary', 'April Vs March 2026');
+  redHeader(slide, 'Overall Performance Overview – Lead Summary', data.leadSummary.comparisonHeader);
   contentBackground(slide);
   const r = data.leadSummary.tableRow;
+  const cur = data.leadSummary.currentMonthName;
+  const prev = data.leadSummary.previousMonthName;
   const tableRows = [
     [
       { text: 'Location', options: th },
-      { text: 'Call Leads (April)', options: th },
-      { text: 'Contact Forms (April)', options: th },
-      { text: 'Chat Widgets (April)', options: th },
-      { text: 'Call Leads (Mar)', options: th },
-      { text: 'Contact Forms(Mar)', options: th },
-      { text: 'Chat Widgets (Mar)', options: th },
+      { text: `Call Leads (${cur})`, options: th },
+      { text: `Contact Forms (${cur})`, options: th },
+      { text: `Chat Widgets (${cur})`, options: th },
+      { text: `Call Leads (${prev})`, options: th },
+      { text: `Contact Forms (${prev})`, options: th },
+      { text: `Chat Widgets (${prev})`, options: th },
     ],
     [
       { text: r.location, options: td },
@@ -324,7 +347,7 @@ function addLeadSummarySlide(pptx: PptxGenJS, data: ReportData) {
     colW: [0.95, 1.15, 1.3, 1.3, 1.15, 1.3, 1.3],
     border,
   });
-  let y = redSubBar(slide, 'Combined Totals – March 2026', MAIN_Y + 0.82);
+  let y = redSubBar(slide, data.leadSummary.combinedTotalsLabel, MAIN_Y + 0.82);
   const boxW = 2.2;
   const boxGap = 0.12;
   const boxH = 0.88;
@@ -354,7 +377,7 @@ function addLeadSummarySlide(pptx: PptxGenJS, data: ReportData) {
       color: C.darkGray,
       align: 'center',
     });
-    if (box.label.includes('(Mar)')) {
+    if (box.isPreviousMonth) {
       slide.addText('Previous month', {
         x: x + 0.12,
         y: y + 0.95,
@@ -367,10 +390,9 @@ function addLeadSummarySlide(pptx: PptxGenJS, data: ReportData) {
       });
     }
   });
+  addSlideBottomInsight(slide, data, 3);
   redFooter(slide, data.month);
 }
-
-/** Slide 4 — Section divider */
 function addSectionSlide(pptx: PptxGenJS, data: ReportData) {
   const slide = pptx.addSlide();
   slide.background = { color: C.sectionMaroon };
@@ -463,6 +485,7 @@ function addPaidAdsOverallSlide(pptx: PptxGenJS, data: ReportData) {
     colW: [2.4, 2.2, 2.2, 2.3],
     border,
   });
+  addSlideBottomInsight(slide, data, 5);
   redFooter(slide, data.month);
 }
 
@@ -517,11 +540,12 @@ function addPaidAdsFloridaSlide(pptx: PptxGenJS, data: ReportData) {
     color: C.navy,
   });
   const mHead = { fill: C.metricsHeadBg, color: C.metricsHeadText, bold: true, fontSize: 9 };
+  const { currentMonthLabel, previousMonthLabel } = data.paidAdsFlorida;
   const tableRows = [
     [
       { text: 'Metric', options: mHead },
-      { text: 'April 2026', options: mHead },
-      { text: 'March 2026', options: mHead },
+      { text: currentMonthLabel, options: mHead },
+      { text: previousMonthLabel, options: mHead },
       { text: 'Change', options: mHead },
       { text: 'Status', options: mHead },
     ],
@@ -540,6 +564,7 @@ function addPaidAdsFloridaSlide(pptx: PptxGenJS, data: ReportData) {
     colW: [1.9, 1.75, 1.75, 1.75, 1.75],
     border: { pt: 0.5, color: 'CCCCCC' },
   });
+  addSlideBottomInsight(slide, data, 6);
   redFooter(slide, data.month);
 }
 
@@ -570,6 +595,7 @@ function addSearchOverviewSlide(pptx: PptxGenJS, data: ReportData) {
     colW: [2.0, 1.3, 1.3, 1.3, 1.2, 1.2],
     border,
   });
+  addSlideBottomInsight(slide, data, 7);
   redFooter(slide, data.month);
 }
 

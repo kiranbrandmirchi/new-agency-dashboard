@@ -1,17 +1,27 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { flushSync } from 'react-dom';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { supabase } from '../lib/supabaseClient';
-import { buildReportDataForSelection, cloneReportServices } from '../data/reportData';
+import {
+  buildReportDataForSelection,
+  cloneReportServices,
+  cloneLeadSummaryTableRow,
+  cloneLeadSummaryStatBoxes,
+  cloneSlideBottomInsights,
+  SLIDE_DEFINITIONS,
+} from '../data/reportData';
 import { generatePptx } from '../utils/generatePptx';
-import { generatePdf, waitForPaint } from '../utils/generatePdf';
+import { generatePdf, waitForExportSlideElements } from '../utils/generatePdf';
 import {
   emptyPaidAdsOverall,
   fetchPaidAdsOverallFromGads,
 } from '../utils/fetchPptSlide5GadsData';
+import {
+  emptyPaidAdsFlorida,
+  fetchPaidAdsFloridaPerformanceData,
+} from '../utils/fetchPptSlide6PerformanceData';
 import { SlidePreviewGrid } from '../components/SlidePreviewGrid';
-
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function getMonthOptions() {
   const options = [];
@@ -29,6 +39,7 @@ function getMonthOptions() {
 }
 
 const MONTH_OPTIONS = getMonthOptions();
+const SLIDE_COUNT = SLIDE_DEFINITIONS.length;
 
 const DownloadIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden style={{ marginRight: 6, verticalAlign: -2 }}>
@@ -60,9 +71,17 @@ export function PptReportPage() {
   const [pdfExportMount, setPdfExportMount] = useState(false);
   /** Slide 2 service text — in-memory only, reset when client/month changes */
   const [slide2Services, setSlide2Services] = useState(null);
-  /** Slide 5 — from gads_campaign_daily (session only) */
+  /** Slide 3 lead summary table — in-memory only, reset when client/month changes */
+  const [slide3TableRow, setSlide3TableRow] = useState(null);
+  /** Slide 3 KPI stat box values — in-memory only */
+  const [slide3StatBoxes, setSlide3StatBoxes] = useState(null);
+  /** Slide 5 — gads_campaign_daily (session only) */
   const [paidAdsOverall, setPaidAdsOverall] = useState(null);
-  const [slide5Loading, setSlide5Loading] = useState(false);
+  /** Slide 6 — ga4_daily_summary + gads_campaign_daily (session only) */
+  const [paidAdsFlorida, setPaidAdsFlorida] = useState(null);
+  /** Bottom insight notes on slides 1, 2, 3, 5, 6, 7 — in-memory only */
+  const [slideBottomInsights, setSlideBottomInsights] = useState(null);
+  const [reportSlidesLoading, setReportSlidesLoading] = useState(false);
   const [pdfExportReport, setPdfExportReport] = useState(null);
   const previewRef = useRef(null);
   const pdfExportRef = useRef(null);
@@ -99,33 +118,64 @@ export function PptReportPage() {
       setPreviewVisible(false);
     }
     setPaidAdsOverall(null);
+    setPaidAdsFlorida(null);
   }, [selectedClientId, selectedMonth]);
 
   const selectedMonthLabel = MONTH_OPTIONS.find((o) => o.value === selectedMonth)?.label || selectedMonth;
   const selectedClientName = clients.find((c) => c.id === selectedClientId)?.name ?? '';
 
-  const loadSlide5GadsData = useCallback(async () => {
-    if (!selectedClientId || !selectedMonth) return null;
-    setSlide5Loading(true);
+  const loadReportSlidesData = useCallback(async () => {
+    if (!selectedClientId || !selectedMonth) return { slide5: null, slide6: null };
+    setReportSlidesLoading(true);
     try {
-      const data = await fetchPaidAdsOverallFromGads(
-        selectedClientId,
-        selectedMonth,
-        selectedMonthLabel,
-        effectiveAgencyId,
-      );
-      setPaidAdsOverall(data);
-      return data;
-    } catch (err) {
-      console.warn('[PptReport] slide 5 gads_campaign_daily:', err);
-      const fallback = emptyPaidAdsOverall(selectedMonthLabel, selectedMonth);
-      setPaidAdsOverall(fallback);
-      showNotification(err?.message || 'Could not load Google Ads data for slide 5');
-      return fallback;
+      const [slide5Result, slide6Result] = await Promise.allSettled([
+        fetchPaidAdsOverallFromGads(
+          selectedClientId,
+          selectedMonth,
+          selectedMonthLabel,
+          effectiveAgencyId,
+        ),
+        fetchPaidAdsFloridaPerformanceData(
+          selectedClientId,
+          selectedMonth,
+          selectedMonthLabel,
+          effectiveAgencyId,
+        ),
+      ]);
+
+      let slide5 = emptyPaidAdsOverall(selectedMonthLabel, selectedMonth);
+      if (slide5Result.status === 'fulfilled') {
+        slide5 = slide5Result.value;
+      } else {
+        console.warn('[PptReport] slide 5 gads_campaign_daily:', slide5Result.reason);
+        showNotification(
+          slide5Result.reason?.message || 'Could not load Google Ads data for slide 5',
+        );
+      }
+
+      let slide6 = emptyPaidAdsFlorida(selectedMonthLabel, selectedMonth);
+      if (slide6Result.status === 'fulfilled') {
+        slide6 = slide6Result.value;
+      } else {
+        console.warn('[PptReport] slide 6 performance data:', slide6Result.reason);
+        showNotification(
+          slide6Result.reason?.message || 'Could not load slide 6 performance data',
+        );
+      }
+
+      setPaidAdsOverall(slide5);
+      setPaidAdsFlorida(slide6);
+      return { slide5, slide6 };
     } finally {
-      setSlide5Loading(false);
+      setReportSlidesLoading(false);
     }
-  }, [selectedClientId, selectedMonth, selectedMonthLabel, effectiveAgencyId, showNotification]);
+  }, [
+    selectedClientId,
+    selectedMonth,
+    selectedMonthLabel,
+    effectiveAgencyId,
+    showNotification,
+  ]);
 
   const baseReportData = useMemo(
     () => buildReportDataForSelection(selectedClientName, selectedMonthLabel, selectedMonth),
@@ -134,6 +184,9 @@ export function PptReportPage() {
 
   useEffect(() => {
     setSlide2Services(cloneReportServices(baseReportData.services));
+    setSlide3TableRow(cloneLeadSummaryTableRow(baseReportData.leadSummary.tableRow));
+    setSlide3StatBoxes(cloneLeadSummaryStatBoxes(baseReportData.leadSummary.statBoxes));
+    setSlideBottomInsights(cloneSlideBottomInsights(baseReportData.slideBottomInsights));
   }, [baseReportData]);
 
   const updateSlide2Service = useCallback((index, field, value) => {
@@ -145,33 +198,84 @@ export function PptReportPage() {
     });
   }, []);
 
+  const SLIDE3_NUMERIC_FIELDS = new Set([
+    'callApril',
+    'formsApril',
+    'chatApril',
+    'callMar',
+    'formsMar',
+    'chatMar',
+  ]);
+
+  const updateSlide3TableRow = useCallback((field, value) => {
+    setSlide3TableRow((prev) => {
+      if (!prev) return prev;
+      let nextValue = value;
+      if (SLIDE3_NUMERIC_FIELDS.has(field)) {
+        const parsed = parseInt(String(value).replace(/[^\d]/g, ''), 10);
+        nextValue = Number.isFinite(parsed) ? parsed : 0;
+      }
+      return { ...prev, [field]: nextValue };
+    });
+  }, []);
+
+  const updateSlide3StatBox = useCallback((index, value) => {
+    setSlide3StatBoxes((prev) => {
+      if (!prev) return prev;
+      const parsed = parseInt(String(value).replace(/[^\d]/g, ''), 10);
+      const nextVal = Number.isFinite(parsed) ? String(parsed) : '0';
+      const next = [...prev];
+      next[index] = { ...next[index], value: nextVal };
+      return next;
+    });
+  }, []);
+
+  const updateSlideBottomInsight = useCallback((slideNum, value) => {
+    setSlideBottomInsights((prev) => {
+      if (!prev) return prev;
+      return { ...prev, [String(slideNum)]: value };
+    });
+  }, []);
+
   const activeReportData = useMemo(
     () => ({
       ...baseReportData,
       services: slide2Services ?? baseReportData.services,
       paidAdsOverall: paidAdsOverall ?? baseReportData.paidAdsOverall,
+      paidAdsFlorida: paidAdsFlorida ?? baseReportData.paidAdsFlorida,
+      leadSummary: {
+        ...baseReportData.leadSummary,
+        tableRow: slide3TableRow ?? baseReportData.leadSummary.tableRow,
+        statBoxes: slide3StatBoxes ?? baseReportData.leadSummary.statBoxes,
+      },
+      slideBottomInsights: slideBottomInsights ?? baseReportData.slideBottomInsights,
     }),
-    [baseReportData, slide2Services, paidAdsOverall],
+    [
+      baseReportData,
+      slide2Services,
+      slide3TableRow,
+      slide3StatBoxes,
+      paidAdsOverall,
+      paidAdsFlorida,
+      slideBottomInsights,
+    ],
   );
 
-  const buildExportReportData = useCallback(
-    async () => {
-      const gads = await loadSlide5GadsData();
-      return {
-        ...baseReportData,
-        services: slide2Services ?? baseReportData.services,
-        paidAdsOverall: gads ?? paidAdsOverall ?? baseReportData.paidAdsOverall,
-      };
-    },
-    [baseReportData, slide2Services, paidAdsOverall, loadSlide5GadsData],
-  );
+  const buildExportReportData = useCallback(async () => {
+    const { slide5, slide6 } = await loadReportSlidesData();
+    return {
+      ...activeReportData,
+      paidAdsOverall: slide5 ?? activeReportData.paidAdsOverall,
+      paidAdsFlorida: slide6 ?? activeReportData.paidAdsFlorida,
+    };
+  }, [activeReportData, loadReportSlidesData]);
 
-  const applyDisabled = !selectedClientId || !selectedMonth || slide5Loading;
-  const downloadsDisabled = !selectedClientId || !selectedMonth || slide5Loading;
+  const applyDisabled = !selectedClientId || !selectedMonth || reportSlidesLoading;
+  const downloadsDisabled = !selectedClientId || !selectedMonth || reportSlidesLoading;
 
   const handleApply = async () => {
     if (!selectedClientId || !selectedMonth) return;
-    await loadSlide5GadsData();
+    await loadReportSlidesData();
     setPreviewVisible(true);
     showNotification(`Preview loaded: ${selectedClientName} — ${selectedMonthLabel}`);
     setTimeout(() => previewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
@@ -200,21 +304,15 @@ export function PptReportPage() {
     setGeneratingFormat('pdf');
     try {
       const exportData = await buildExportReportData();
-      setPdfExportReport(exportData);
-      setPdfExportMount(true);
-      await waitForPaint();
-      await sleep(500);
-      if (document.fonts?.ready) {
-        await document.fonts.ready;
-      }
 
-      const container = pdfExportRef.current;
-      const slideEls = container?.querySelectorAll('.ppt-slide-card');
-      if (!slideEls?.length) {
-        throw new Error('No slides available to export');
-      }
+      flushSync(() => {
+        setPdfExportReport(exportData);
+        setPdfExportMount(true);
+      });
 
-      await generatePdf(Array.from(slideEls), {
+      const slideEls = await waitForExportSlideElements(pdfExportRef.current, SLIDE_COUNT);
+
+      await generatePdf(slideEls, {
         clientName: selectedClientName,
         monthLabel: selectedMonthLabel,
       });
@@ -293,7 +391,7 @@ export function PptReportPage() {
                     onClick={handleApply}
                     disabled={applyDisabled}
                   >
-                    {slide5Loading ? 'Loading…' : 'Apply'}
+                    {reportSlidesLoading ? 'Loading…' : 'Apply'}
                   </button>
                   <button
                     type="button"
@@ -330,7 +428,12 @@ export function PptReportPage() {
               report={activeReportData}
               slide2Editable
               updateSlide2Service={updateSlide2Service}
-              slide5Loading={slide5Loading}
+              slide3Editable
+              updateSlide3TableRow={updateSlide3TableRow}
+              updateSlide3StatBox={updateSlide3StatBox}
+              slideBottomInsightEditable
+              updateSlideBottomInsight={updateSlideBottomInsight}
+              reportSlidesLoading={reportSlidesLoading}
             />
           </div>
         )}

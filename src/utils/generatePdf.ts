@@ -107,3 +107,26 @@ export async function generatePdf(
 }
 
 export { waitForPaint };
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+/** Wait until the export mount has rendered all slide cards (post-flushSync). */
+export async function waitForExportSlideElements(
+  container: HTMLElement | null | undefined,
+  expectedCount: number,
+): Promise<HTMLElement[]> {
+  for (let attempt = 0; attempt < 60; attempt++) {
+    await waitForPaint();
+    if (document.fonts?.ready) {
+      await document.fonts.ready;
+    }
+    const els = container?.querySelectorAll('.ppt-slide-card');
+    if (els && els.length >= expectedCount) {
+      return Array.from(els) as HTMLElement[];
+    }
+    await sleep(50);
+  }
+  throw new Error('No slides available to export');
+}

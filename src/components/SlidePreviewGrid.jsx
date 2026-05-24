@@ -11,7 +11,12 @@ export function SlidePreviewGrid({
   exportMode = false,
   slide2Editable = false,
   updateSlide2Service,
-  slide5Loading = false,
+  slide3Editable = false,
+  updateSlide3TableRow,
+  updateSlide3StatBox,
+  slideBottomInsightEditable = false,
+  updateSlideBottomInsight,
+  reportSlidesLoading = false,
 }) {
   const grid = (
     <div className="ppt-preview-grid">
@@ -24,6 +29,11 @@ export function SlidePreviewGrid({
           report={report}
           slide2Editable={slide2Editable}
           updateSlide2Service={updateSlide2Service}
+          slide3Editable={slide3Editable}
+          updateSlide3TableRow={updateSlide3TableRow}
+          updateSlide3StatBox={updateSlide3StatBox}
+          slideBottomInsightEditable={slideBottomInsightEditable}
+          updateSlideBottomInsight={updateSlideBottomInsight}
         />
       ))}
     </div>
@@ -40,9 +50,8 @@ export function SlidePreviewGrid({
           {clientName} — {monthLabel} Report Preview
         </h3>
         <p>
-          Slide 2: editable (session) · slide 5 KPIs: current calendar month · table: selected vs prior month
-          {slide5Loading ? ' · loading slide 5…' : ''}
-          {' · '}slides 1, 4–6: client &amp; month · 7–10: sample
+          Slide 2, 3 &amp; bottom notes: editable (session) · slides 5–6: live Supabase data · 7–10: sample
+          {reportSlidesLoading ? ' · loading slides 5–6…' : ''}
         </p>
       </div>
       {grid}

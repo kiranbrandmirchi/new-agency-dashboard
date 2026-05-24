@@ -30,6 +30,10 @@ export const reportData = {
   ],
 
   leadSummary: {
+    comparisonHeader: 'April Vs March 2026',
+    combinedTotalsLabel: 'Combined Totals – March 2026',
+    currentMonthName: 'April',
+    previousMonthName: 'March',
     tableRow: {
       location: 'Florida',
       callApril: 715,
@@ -71,6 +75,8 @@ export const reportData = {
   },
 
   paidAdsFlorida: {
+    currentMonthLabel: 'April 2026',
+    previousMonthLabel: 'March 2026',
     current: {
       label: 'April 2026',
       tag: 'Current Month',
@@ -144,9 +150,24 @@ export const reportData = {
       'Clicks increased by 3.72%, indicating improved ad visibility, while total users and views also grew by +13.38% and +11.45%, reflecting strong user interest in the services.',
     goal: 'Our focus is to drive more qualified leads, improve ad quality, and continuously monitor and optimize campaigns to enhance overall performance.',
   },
+
+  /** Editable green insight box at bottom of slides 1, 2, 3, 5, 6, 7 (session only). */
+  slideBottomInsights: {
+    '1': '',
+    '2': '',
+    '3': '',
+    '5': '',
+    '6': '',
+    '7': '',
+  },
 };
 
 export type ReportData = typeof reportData;
+
+/** Slides with editable bottom insight box */
+export const SLIDE_BOTTOM_INSIGHT_NUMS = [1, 2, 3, 5, 6, 7] as const;
+
+export type SlideBottomInsightNum = (typeof SLIDE_BOTTOM_INSIGHT_NUMS)[number];
 
 /** e.g. "2026-04-01" → "April 2026" */
 export function formatMonthYearLabel(year: number, monthIndex0: number): string {
@@ -170,6 +191,52 @@ export function buildPaidAdsComparisonSubtitle(
   previousMonthLabel: string,
 ): string {
   return `${currentMonthLabel} vs ${previousMonthLabel} cost and conversion analysis`;
+}
+
+/** "April 2026" → "April" */
+export function getMonthNameFromLabel(monthLabel: string): string {
+  return monthLabel.replace(/\s+\d{4}$/, '').trim();
+}
+
+/** Slide 3 header right side, e.g. "April Vs March 2026". */
+export function buildLeadSummaryComparisonHeader(
+  monthLabel: string,
+  monthValue: string,
+): string {
+  const previousMonthLabel = getPreviousMonthLabel(monthValue);
+  if (!previousMonthLabel) return monthLabel;
+
+  const currentMonthName = getMonthNameFromLabel(monthLabel);
+  const prevMonthName = getMonthNameFromLabel(previousMonthLabel);
+  const currentYear = monthLabel.match(/(\d{4})$/)?.[1] ?? '';
+  const prevYear = previousMonthLabel.match(/(\d{4})$/)?.[1] ?? '';
+  const yearSuffix = prevYear && prevYear !== currentYear ? prevYear : currentYear;
+
+  return `${currentMonthName} Vs ${prevMonthName} ${yearSuffix}`;
+}
+
+/** Slide 3 KPI cards — last two blocks use previous month in labels. */
+export function buildLeadSummaryStatBoxes(
+  statBoxes: ReportData['leadSummary']['statBoxes'],
+  previousMonthName: string,
+): ReportData['leadSummary']['statBoxes'] {
+  return statBoxes.map((box, index) => {
+    if (index === 2) {
+      return {
+        ...box,
+        label: `Total Calls (${previousMonthName}) — Previous month`,
+        isPreviousMonth: true,
+      };
+    }
+    if (index === 3) {
+      return {
+        ...box,
+        label: `Total Forms and Chat Widgets (${previousMonthName})`,
+        isPreviousMonth: true,
+      };
+    }
+    return box;
+  });
 }
 
 /** Merge UI selections into the report payload (slides 1–6 client/month fields, footers, etc.) */
@@ -197,12 +264,63 @@ export function buildReportDataForSelection(
       currentMonthLabel: monthLabel,
       previousMonthLabel,
     },
+    leadSummary: {
+      ...reportData.leadSummary,
+      comparisonHeader: buildLeadSummaryComparisonHeader(monthLabel, monthValue),
+      combinedTotalsLabel: previousMonthLabel
+        ? `Combined Totals – ${previousMonthLabel}`
+        : reportData.leadSummary.combinedTotalsLabel,
+      currentMonthName: getMonthNameFromLabel(monthLabel),
+      previousMonthName: previousMonthLabel
+        ? getMonthNameFromLabel(previousMonthLabel)
+        : reportData.leadSummary.previousMonthName,
+      statBoxes: buildLeadSummaryStatBoxes(
+        reportData.leadSummary.statBoxes,
+        previousMonthLabel
+          ? getMonthNameFromLabel(previousMonthLabel)
+          : reportData.leadSummary.previousMonthName,
+      ),
+    },
+    paidAdsFlorida: {
+      ...reportData.paidAdsFlorida,
+      currentMonthLabel: monthLabel,
+      previousMonthLabel: previousMonthLabel || reportData.paidAdsFlorida.previousMonthLabel,
+      current: {
+        ...reportData.paidAdsFlorida.current,
+        label: monthLabel,
+      },
+      previous: {
+        ...reportData.paidAdsFlorida.previous,
+        label: previousMonthLabel || reportData.paidAdsFlorida.previous.label,
+      },
+    },
   };
 }
 
 /** Deep-copy slide 2 service rows for in-session editing (not persisted). */
 export function cloneReportServices(services: ReportData['services']): ReportData['services'] {
   return services.map((s) => ({ ...s }));
+}
+
+/** Deep-copy slide 3 lead summary table row for in-session editing (not persisted). */
+export function cloneLeadSummaryTableRow(
+  row: ReportData['leadSummary']['tableRow'],
+): ReportData['leadSummary']['tableRow'] {
+  return { ...row };
+}
+
+/** Deep-copy slide 3 KPI stat boxes for in-session editing (not persisted). */
+export function cloneLeadSummaryStatBoxes(
+  statBoxes: ReportData['leadSummary']['statBoxes'],
+): ReportData['leadSummary']['statBoxes'] {
+  return statBoxes.map((box) => ({ ...box }));
+}
+
+/** Deep-copy slide bottom insight notes for in-session editing (not persisted). */
+export function cloneSlideBottomInsights(
+  insights: ReportData['slideBottomInsights'],
+): ReportData['slideBottomInsights'] {
+  return { ...insights };
 }
 
 /** Slides 1–10 only */
