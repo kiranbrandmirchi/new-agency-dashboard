@@ -70,6 +70,22 @@ function previousPeriod(from, to) {
   return { from: pFrom, to: pTo };
 }
 
+/** Prior full calendar month (e.g. Apr 1–30 → Mar 1–31). */
+function previousCalendarMonth(from, to) {
+  const ref = to || from;
+  if (!ref) return { from: null, to: null };
+  const y = ref.getFullYear();
+  const m = ref.getMonth();
+  return {
+    from: new Date(y, m - 1, 1),
+    to: new Date(y, m, 0),
+  };
+}
+
+function resolveComparePeriod(from, to, useCalendarMonth) {
+  return useCalendarMonth ? previousCalendarMonth(from, to) : previousPeriod(from, to);
+}
+
 function startOfDay(d) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 }
@@ -111,6 +127,10 @@ export function DateRangePicker({
   onApply,
   /** Full-width trigger with date range aligned to the right (report title bars). */
   blockLayout = false,
+  /** Compare period = previous full calendar month (monthly reports). */
+  compareCalendarMonth = false,
+  /** Align dropdown to left edge (avoids clipping in narrow panels). */
+  dropdownAlign = 'right',
 }) {
   const containerRef = useRef(null);
   const [isOpen, setIsOpen] = useState(false);
@@ -192,7 +212,7 @@ export function DateRangePicker({
       setDraft(prev => {
         const next = { ...prev, preset: key, from: range.from, to: range.to };
         if (prev.compare) {
-          const pp = previousPeriod(range.from, range.to);
+          const pp = resolveComparePeriod(range.from, range.to, compareCalendarMonth);
           next.compFrom = pp.from;
           next.compTo = pp.to;
         }
@@ -206,7 +226,7 @@ export function DateRangePicker({
       setDraft(prev => ({ ...prev, preset: key }));
       setSelectMode('primary-from');
     }
-  }, []);
+  }, [compareCalendarMonth]);
 
   /* ── Day click ── */
   const handleDayClick = useCallback((day) => {
@@ -224,10 +244,10 @@ export function DateRangePicker({
           next.to = day;
         }
         if (prev.compare) {
-          const pp = previousPeriod(next.from, next.to);
+          const pp = resolveComparePeriod(next.from, next.to, compareCalendarMonth);
           next.compFrom = pp.from;
           next.compTo = pp.to;
-          setSelectMode('compare-from');
+          setSelectMode(compareCalendarMonth ? 'primary-from' : 'compare-from');
         } else {
           setSelectMode('primary-from');
         }
@@ -246,7 +266,7 @@ export function DateRangePicker({
       }
       return next;
     });
-  }, [selectMode]);
+  }, [selectMode, compareCalendarMonth]);
 
   /* ── Compare toggle ── */
   const handleCompareToggle = useCallback((e) => {
@@ -254,10 +274,10 @@ export function DateRangePicker({
     setDraft(prev => {
       const next = { ...prev, compare: checked };
       if (checked && prev.from && prev.to) {
-        const pp = previousPeriod(prev.from, prev.to);
+        const pp = resolveComparePeriod(prev.from, prev.to, compareCalendarMonth);
         next.compFrom = pp.from;
         next.compTo = pp.to;
-        setSelectMode('compare-from');
+        setSelectMode(compareCalendarMonth ? 'primary-from' : 'compare-from');
       } else if (!checked) {
         next.compFrom = null;
         next.compTo = null;
@@ -265,7 +285,7 @@ export function DateRangePicker({
       }
       return next;
     });
-  }, []);
+  }, [compareCalendarMonth]);
 
   /* ── Month nav ── */
   const navLeft = useCallback((dir) => {
@@ -459,7 +479,10 @@ export function DateRangePicker({
         </div>
       )}
 
-      <div className={`dp-dropdown ${isOpen ? 'open' : ''}`}>
+      <div
+        className={`dp-dropdown ${isOpen ? 'open' : ''}`}
+        style={dropdownAlign === 'left' ? { left: 0, right: 'auto' } : undefined}
+      >
         <div className="dp-presets">
           {PRESETS.map(p => (
             <button

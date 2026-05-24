@@ -1,18 +1,31 @@
 import React, { useRef } from 'react';
 import Papa from 'papaparse';
 
-function downloadTemplate() {
-  const csv = `Metric,Value,Notes,Source\nImpression Share,45.2%,Top competitor data,Auction Insights\nPhone Calls,156,From CallRail,Call Tracking`;
+function downloadCsvFile(csv, filename) {
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'upload_template.csv';
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
 }
 
-export function CsvUploader({ label, value, onChange, disabled }) {
+function downloadTemplate() {
+  downloadCsvFile(
+    `Metric,Value,Notes,Source\nImpression Share,45.2%,Top competitor data,Auction Insights\nPhone Calls,156,From CallRail,Call Tracking`,
+    'upload_template.csv',
+  );
+}
+
+export function CsvUploader({
+  label,
+  value,
+  onChange,
+  disabled,
+  templateHeaders,
+  templateFilename = 'upload_template.csv',
+}) {
   const inputRef = useRef(null);
 
   const handleFile = (e) => {
@@ -56,7 +69,13 @@ export function CsvUploader({ label, value, onChange, disabled }) {
         <button
           type="button"
           className="btn btn-outline btn-sm"
-          onClick={downloadTemplate}
+          onClick={() => {
+            if (templateHeaders?.length) {
+              downloadCsvFile(`${templateHeaders.join(',')}\n`, templateFilename);
+            } else {
+              downloadTemplate();
+            }
+          }}
           style={{ fontSize: 11 }}
         >
           Download Template

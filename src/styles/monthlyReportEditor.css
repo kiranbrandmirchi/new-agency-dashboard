@@ -1,0 +1,176 @@
+/* Monthly report editor — layout & config bar */
+
+.mr-editor-layout {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.mr-editor-sidebar {
+  position: sticky;
+  top: calc(var(--header-height, 56px) + 12px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mr-editor-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mr-editor-main {
+  min-width: 0;
+  overflow: visible;
+}
+
+/* Allow date picker dropdown to extend outside the panel */
+#page-monthly-report-editor .mr-config-bar.panel {
+  overflow: visible;
+}
+
+#page-monthly-report-editor .mr-config-bar .panel-body {
+  overflow: visible;
+}
+
+.mr-config-bar .panel-body h3 {
+  margin: 0 0 16px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--navy);
+}
+
+.mr-config-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 20px 24px;
+  margin-bottom: 16px;
+}
+
+.mr-config-client {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 0 0 220px;
+  min-width: 180px;
+  max-width: 280px;
+}
+
+.mr-config-dates {
+  position: relative;
+  z-index: 40;
+  flex: 1 1 360px;
+  min-width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mr-config-client label,
+.mr-config-dates label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+
+.mr-config-select {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-family: var(--font-family);
+  background: var(--bg);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.mr-config-select:focus {
+  border-color: var(--navy);
+  box-shadow: 0 0 0 3px var(--navy-bg);
+}
+
+.mr-config-dates-hint {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.mr-config-dates .date-picker-trigger {
+  width: 100%;
+  justify-content: flex-start;
+}
+
+#page-monthly-report-editor .mr-config-dates .dp-dropdown {
+  left: 0;
+  right: auto;
+  max-width: min(720px, calc(100vw - 280px));
+}
+
+.mr-account-selectors {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-light);
+}
+
+.mr-account-group label.gads-filter-label,
+.mr-account-group > label {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.mr-account-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.mr-account-row .form-control {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.mr-no-accounts {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+@media (max-width: 900px) {
+  .mr-editor-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .mr-editor-sidebar {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .mr-editor-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  #page-monthly-report-editor .mr-config-dates .dp-dropdown {
+    max-width: calc(100vw - 48px);
+  }
+}
