@@ -16,6 +16,7 @@ export type MonthlyExportData = {
   preparedBy: string;
   website: string;
   coverLogoUrl: string;
+  compareOn?: boolean;
   currentLabel: string;
   previousLabel: string;
   currentShortLabel: string;
@@ -70,7 +71,7 @@ const C = {
   sectionAccent: 'A82828',
   salmon: 'F08080',
   white: 'FFFFFF',
-  contentBg: 'ECECEC',
+  contentBg: 'FFFFFF',
   darkGray: '333333',
   midGray: '666666',
   slate: '64748B',
@@ -396,6 +397,7 @@ function addContentSlide2(pptx: PptxGenJS, data: MonthlyExportData) {
 /** Slide 3 — Lead Summary */
 function addLeadSummarySlide(pptx: PptxGenJS, data: MonthlyExportData) {
   const slide = pptx.addSlide();
+  const compareOn = data.compareOn !== false;
   const cur = data.currentShortLabel || data.currentLabel;
   const prev = data.previousShortLabel || data.previousLabel;
   redHeader(slide, 'Overall Performance Overview – Lead Summary', data.comparisonHeader);
@@ -404,67 +406,82 @@ function addLeadSummarySlide(pptx: PptxGenJS, data: MonthlyExportData) {
     location: data.client, callCurrent: 0, formsCurrent: 0, chatCurrent: 0, callPrevious: 0, formsPrevious: 0, chatPrevious: 0,
   }];
   const thSm = { ...th, fontSize: 8 };
+  const headerCells = compareOn ? [
+    { text: 'Location', options: th },
+    { text: `Calls (${cur})`, options: thSm },
+    { text: `Forms (${cur})`, options: thSm },
+    { text: `Chat (${cur})`, options: thSm },
+    { text: `Calls (${prev})`, options: thSm },
+    { text: `Forms (${prev})`, options: thSm },
+    { text: `Chat (${prev})`, options: thSm },
+  ] : [
+    { text: 'Location', options: th },
+    { text: `Calls (${cur})`, options: thSm },
+    { text: `Forms (${cur})`, options: thSm },
+    { text: `Chat (${cur})`, options: thSm },
+  ];
   const tableRows = [
-    [
-      { text: 'Location', options: th },
-      { text: `Calls (${cur})`, options: thSm },
-      { text: `Forms (${cur})`, options: thSm },
-      { text: `Chat (${cur})`, options: thSm },
-      { text: `Calls (${prev})`, options: thSm },
-      { text: `Forms (${prev})`, options: thSm },
-      { text: `Chat (${prev})`, options: thSm },
-    ],
-    ...rows.map((r, i) => [
-      { text: r.location, options: { ...td, align: 'left', fontSize: 8 } },
-      { text: String(r.callCurrent), options: { ...td, bold: i === 0 } },
-      { text: String(r.formsCurrent), options: tdCenter },
-      { text: String(r.chatCurrent), options: tdCenter },
-      { text: String(r.callPrevious), options: tdCenter },
-      { text: String(r.formsPrevious), options: tdCenter },
-      { text: String(r.chatPrevious), options: tdCenter },
-    ]),
+    headerCells,
+    ...rows.map((r, i) => {
+      const base = [
+        { text: r.location, options: { ...td, align: 'left', fontSize: 8 } },
+        { text: String(r.callCurrent), options: { ...td, bold: i === 0 } },
+        { text: String(r.formsCurrent), options: tdCenter },
+        { text: String(r.chatCurrent), options: tdCenter },
+      ];
+      if (!compareOn) return base;
+      return [
+        ...base,
+        { text: String(r.callPrevious), options: tdCenter },
+        { text: String(r.formsPrevious), options: tdCenter },
+        { text: String(r.chatPrevious), options: tdCenter },
+      ];
+    }),
   ];
   const tableY = MAIN_Y + 0.1;
   const rowCount = rows.length;
   const tableRowH = 0.3;
+  const colW = compareOn
+    ? [1.55, 1.15, 1.2, 1.15, 1.15, 1.2, 1.15]
+    : [3.6, 2.0, 2.0, 1.9];
   addDataTable(slide, tableRows, {
     y: tableY,
-    colW: [1.55, 1.15, 1.2, 1.15, 1.15, 1.2, 1.15],
+    colW,
     rowH: tableRowH,
     border,
   });
   let y = redSubBar(
     slide,
-    data.leadSummary.totalsSubBar || `Combined Totals – ${prev}`,
-    tableBottomY(tableY, rowCount, tableRowH) + 0.06,
+    data.leadSummary.totalsSubBar || 'Combined Totals',
+    tableBottomY(tableY, rowCount, tableRowH) + 0.22,
   );
-  const boxW = 2.15;
-  const boxGap = 0.1;
-  const boxH = 0.66;
-  const accents = [C.green, C.darkGray, C.darkGray, C.darkGray];
-  const bgFills = [C.greenLight, 'F3F4F6', 'F3F4F6', 'F3F4F6'];
-  const valColors = [C.green, C.darkGray, C.darkGray, C.darkGray];
-  const statBoxes = Array.isArray(data.leadSummary.statBoxes) ? data.leadSummary.statBoxes : [];
+  const expectedBoxes = compareOn ? 4 : 2;
+  const statBoxes = (Array.isArray(data.leadSummary.statBoxes) ? data.leadSummary.statBoxes : []).slice(0, expectedBoxes);
+  const boxGap = 0.12;
+  const totalGap = boxGap * (statBoxes.length - 1 || 0);
+  const boxW = statBoxes.length ? (9.3 - totalGap) / statBoxes.length : 2.15;
+  const boxH = 0.72;
+  const boxesY = y + 0.16;
   statBoxes.forEach((box, i) => {
     const x = 0.35 + i * (boxW + boxGap);
-    slide.addShape('rect', { x, y: y + 0.08, w: boxW, h: boxH, fill: { color: bgFills[i] } });
-    slide.addShape('rect', { x, y: y + 0.08, w: 0.1, h: boxH, fill: { color: accents[i] } });
+    slide.addShape('rect', { x, y: boxesY, w: boxW, h: boxH, fill: { color: 'F3F4F6' } });
+    slide.addShape('rect', { x, y: boxesY, w: 0.1, h: boxH, fill: { color: C.darkGray } });
     slide.addText(box.value, {
       x: x + 0.15,
-      y: y + 0.14,
+      y: boxesY + 0.08,
       w: boxW - 0.2,
-      h: 0.34,
+      h: 0.36,
       fontSize: 22,
       bold: true,
-      color: valColors[i],
+      color: C.darkGray,
       align: 'center',
     });
     slide.addText(box.label, {
       x: x + 0.12,
-      y: y + 0.5,
+      y: boxesY + 0.46,
       w: boxW - 0.15,
-      h: 0.22,
-      fontSize: 7,
+      h: 0.24,
+      fontSize: 8,
       color: C.darkGray,
       align: 'center',
       valign: 'top',
@@ -503,17 +520,20 @@ function addSectionSlide(pptx: PptxGenJS, data: MonthlyExportData) {
 /** Slide 5 — Paid Ads Performance */
 function addPaidAdsOverallSlide(pptx: PptxGenJS, data: MonthlyExportData) {
   const slide = pptx.addSlide();
+  const compareOn = data.compareOn !== false;
   redHeader(slide, 'Paid Ads Performance', data.client);
   contentBackground(slide);
   const y0 = MAIN_Y + 0.12;
-  slide.addText(data.paidAdsOverall.comparisonSubtitle, {
-    x: 0.35,
-    y: y0,
-    w: 9,
-    h: 0.22,
-    fontSize: 9,
-    color: C.slate,
-  });
+  if (compareOn) {
+    slide.addText(data.paidAdsOverall.comparisonSubtitle, {
+      x: 0.35,
+      y: y0,
+      w: 9,
+      h: 0.22,
+      fontSize: 9,
+      color: C.slate,
+    });
+  }
   const icons = ['$', '↗', '◎', '▲'];
   const iconFills = [C.iconBlue, C.iconGreen, C.iconOrange, C.iconPurple];
   const iconColors = ['1D4ED8', '15803D', 'C2410C', '7C3AED'];
@@ -539,33 +559,48 @@ function addPaidAdsOverallSlide(pptx: PptxGenJS, data: MonthlyExportData) {
     color: C.navy,
   });
   const { currentMonthLabel, previousMonthLabel } = data.paidAdsOverall;
-  const pillY = panelY + 0.08;
-  slide.addShape('rect', { x: 7.0, y: pillY, w: 1.05, h: 0.28, fill: { color: C.tabBlue } });
-  slide.addText(currentMonthLabel, { x: 7.0, y: pillY + 0.04, w: 1.05, h: 0.22, fontSize: 7, color: C.white, align: 'center' });
-  slide.addShape('rect', { x: 8.1, y: pillY, w: 1.05, h: 0.28, fill: { color: C.white }, line: { color: 'D1D5DB', width: 0.5 } });
-  slide.addText(previousMonthLabel, { x: 8.1, y: pillY + 0.04, w: 1.05, h: 0.22, fontSize: 7, color: C.slate, align: 'center' });
+  if (compareOn) {
+    const pillY = panelY + 0.08;
+    slide.addShape('rect', { x: 7.0, y: pillY, w: 1.05, h: 0.28, fill: { color: C.tabBlue } });
+    slide.addText(currentMonthLabel, { x: 7.0, y: pillY + 0.04, w: 1.05, h: 0.22, fontSize: 7, color: C.white, align: 'center' });
+    slide.addShape('rect', { x: 8.1, y: pillY, w: 1.05, h: 0.28, fill: { color: C.white }, line: { color: 'D1D5DB', width: 0.5 } });
+    slide.addText(previousMonthLabel, { x: 8.1, y: pillY + 0.04, w: 1.05, h: 0.22, fontSize: 7, color: C.slate, align: 'center' });
+  }
+  const tableData = Array.isArray(data.paidAdsOverall.table) ? data.paidAdsOverall.table : [];
+  const headerRow = compareOn
+    ? [
+        { text: 'Metric', options: th },
+        { text: currentMonthLabel, options: th },
+        { text: previousMonthLabel, options: th },
+        { text: 'Change', options: th },
+      ]
+    : [
+        { text: 'Metric', options: th },
+        { text: currentMonthLabel, options: th },
+      ];
   const tableRows = [
-    [
-      { text: 'Metric', options: th },
-      { text: currentMonthLabel, options: th },
-      { text: previousMonthLabel, options: th },
-      { text: 'Change', options: th },
-    ],
-    ...(Array.isArray(data.paidAdsOverall.table) ? data.paidAdsOverall.table : []).map((row) => [
-      { text: row.metric, options: td },
-      { text: row.current, options: tdCenter },
-      { text: row.previous, options: tdCenter },
-      {
-        text: row.change,
-        options: { fontSize: 9, bold: true, color: row.positive ? C.green : C.redChange, fill: C.white, align: 'center' },
-      },
-    ]),
+    headerRow,
+    ...tableData.map((row) => {
+      const base = [
+        { text: row.metric, options: td },
+        { text: row.current, options: tdCenter },
+      ];
+      if (!compareOn) return base;
+      return [
+        ...base,
+        { text: row.previous, options: tdCenter },
+        {
+          text: row.change,
+          options: { ...tdCenter, bold: true, color: row.positive ? C.green : C.redChange },
+        },
+      ];
+    }),
   ];
   addDataTable(slide, tableRows, {
     x: 0.45,
     y: panelY + 0.45,
     w: 9.1,
-    colW: [2.4, 2.2, 2.2, 2.3],
+    colW: compareOn ? [2.4, 2.2, 2.2, 2.3] : [4.55, 4.55],
     rowH: 0.3,
     border,
   });
@@ -576,6 +611,7 @@ function addPaidAdsOverallSlide(pptx: PptxGenJS, data: MonthlyExportData) {
 /** Slide 6 — Performance Overview */
 function addPaidAdsFloridaSlide(pptx: PptxGenJS, data: MonthlyExportData) {
   const slide = pptx.addSlide();
+  const compareOn = data.compareOn !== false;
   redHeader(slide, 'Performance Overview', data.client);
   contentBackground(slide);
 
@@ -583,13 +619,13 @@ function addPaidAdsFloridaSlide(pptx: PptxGenJS, data: MonthlyExportData) {
     panel: typeof data.paidAdsFlorida.current,
     x: number,
     y: number,
+    w: number,
     titleColor: string,
   ) => {
-    const w = 4.45;
     const h = 1.28;
     slide.addShape('rect', { x, y, w, h, fill: { color: C.white }, line: { color: 'E5E7EB', width: 0.5 } });
     slide.addText(panel.label, { x: x + 0.12, y: y + 0.08, w: 2.2, h: 0.28, fontSize: 11, bold: true, color: titleColor });
-    slide.addText(panel.tag, { x: x + 2.5, y: y + 0.1, w: 1.8, h: 0.25, fontSize: 8, color: C.slate, align: 'right' });
+    slide.addText(panel.tag, { x: x + (w - 1.9), y: y + 0.1, w: 1.8, h: 0.25, fontSize: 8, color: C.slate, align: 'right' });
     const items = [
       ['Users', panel.users],
       ['Sessions', panel.sessions],
@@ -611,8 +647,12 @@ function addPaidAdsFloridaSlide(pptx: PptxGenJS, data: MonthlyExportData) {
 
   const rowY = MAIN_Y + 0.1;
   const cardH = 1.28;
-  addMetricCard(data.paidAdsFlorida.current, 0.35, rowY, C.redBar);
-  addMetricCard(data.paidAdsFlorida.previous, 5.0, rowY, C.midGray);
+  if (compareOn) {
+    addMetricCard(data.paidAdsFlorida.current, 0.35, rowY, 4.45, C.redBar);
+    addMetricCard(data.paidAdsFlorida.previous, 5.0, rowY, 4.45, C.midGray);
+  } else {
+    addMetricCard(data.paidAdsFlorida.current, 0.35, rowY, 9.1, C.redBar);
+  }
 
   const metrics = Array.isArray(data.paidAdsFlorida.table) ? data.paidAdsFlorida.table : [];
   const tableRowH = 0.25;
@@ -639,29 +679,43 @@ function addPaidAdsFloridaSlide(pptx: PptxGenJS, data: MonthlyExportData) {
   };
   const curLabel = data.paidAdsFlorida.current.label;
   const prevLabel = data.paidAdsFlorida.previous.label;
+  const headerCells = compareOn
+    ? [
+        { text: 'Metric', options: mHead },
+        { text: curLabel, options: mHead },
+        { text: prevLabel, options: mHead },
+        { text: 'Change', options: mHead },
+      ]
+    : [
+        { text: 'Metric', options: mHead },
+        { text: curLabel, options: mHead },
+      ];
+  const metricsBorder = { pt: 0.5, color: 'CCCCCC' };
   const tableRows = [
-    [
-      { text: 'Metric', options: mHead },
-      { text: curLabel, options: mHead },
-      { text: prevLabel, options: mHead },
-      { text: 'Change', options: mHead },
-      { text: 'Status', options: mHead },
-    ],
-    ...(Array.isArray(data.paidAdsFlorida.table) ? data.paidAdsFlorida.table : []).map((row) => [
-      { text: row.metric, options: td },
-      { text: row.current, options: tdCenter },
-      { text: row.previous, options: tdCenter },
-      { text: row.change, options: { fontSize: 9, bold: true, color: row.positive ? C.green : C.redChange, fill: C.white, align: 'center' } },
-      { text: row.status, options: tdCenter },
-    ]),
+    headerCells,
+    ...metrics.map((row) => {
+      const base = [
+        { text: row.metric, options: td },
+        { text: row.current, options: tdCenter },
+      ];
+      if (!compareOn) return base;
+      return [
+        ...base,
+        { text: row.previous, options: tdCenter },
+        {
+          text: row.change,
+          options: { ...tdCenter, bold: true, color: row.positive ? C.green : C.redChange },
+        },
+      ];
+    }),
   ];
   addDataTable(slide, tableRows, {
     x: 0.45,
     y: panelY + 0.36,
     w: 9.1,
-    colW: [1.9, 1.75, 1.75, 1.75, 1.75],
+    colW: compareOn ? [2.3, 2.3, 2.3, 2.2] : [4.55, 4.55],
     rowH: tableRowH,
-    border: { pt: 0.5, color: 'CCCCCC' },
+    border: metricsBorder,
   });
   addBottomNotesBox(slide, 'Notes', [], 'Performance trends and recommendations.');
   redFooter(slide, data.month);

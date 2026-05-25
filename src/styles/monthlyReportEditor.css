@@ -102,6 +102,46 @@
   line-height: 1.4;
 }
 
+.mr-compare-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.mr-compare-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.mr-compare-toggle input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
+.mr-compare-toggle-row .badge {
+  font-size: 10px;
+  letter-spacing: 0.5px;
+}
+
+.badge-muted {
+  background: #6b7280;
+  color: #fff;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
 .mr-config-dates .date-picker-trigger {
   width: 100%;
   justify-content: flex-start;

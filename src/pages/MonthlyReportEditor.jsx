@@ -137,7 +137,8 @@ export function MonthlyReportEditor({ reportId, onBack }) {
     previousLabel,
     reportFrom,
     compareFrom,
-  }), [report, agency, sections, slide2, slide3, slide8, slide9data, slide9notes, slide10, slideData, monthLabel, previousLabel, reportFrom, compareFrom]);
+    compareOn,
+  }), [report, agency, sections, slide2, slide3, slide8, slide9data, slide9notes, slide10, slideData, monthLabel, previousLabel, reportFrom, compareFrom, compareOn]);
 
   const handlers = useMemo(() => ({
     slide2, slide3, slide8, slide9data, slide9notes, slide10,
@@ -173,8 +174,12 @@ export function MonthlyReportEditor({ reportId, onBack }) {
   }, [upsertSections, slide2, slide3, slide8, slide9data, slide9notes, slide10, showNotification]);
 
   const handleApply = useCallback(async () => {
-    if (!reportFrom || !reportTo || !compareFrom || !compareTo) {
-      showNotification('Set report and comparison date ranges');
+    if (!reportFrom || !reportTo) {
+      showNotification('Set report date range');
+      return;
+    }
+    if (compareOn && (!compareFrom || !compareTo)) {
+      showNotification('Set comparison date range or turn comparison off');
       return;
     }
     try {
@@ -182,18 +187,23 @@ export function MonthlyReportEditor({ reportId, onBack }) {
         .map(([platformAccountId, v]) => ({ platform_account_id: platformAccountId, label: v.label }));
       const savedAccounts = await saveAccounts(selected.map((a, i) => ({ ...a, sort_order: i })));
 
-      const ranges = { currentFrom: reportFrom, currentTo: reportTo, prevFrom: compareFrom, prevTo: compareTo };
-      await fetchReportData(ranges, savedAccounts);
+      const ranges = {
+        currentFrom: reportFrom,
+        currentTo: reportTo,
+        prevFrom: compareOn ? compareFrom : reportFrom,
+        prevTo: compareOn ? compareTo : reportTo,
+      };
+      await fetchReportData(ranges, savedAccounts, { compareOn });
 
       if (slideData?.slide3Prefill && !getSectionText(sections, 'slide3_leads', '')) {
         setSlide3(slideData.slide3Prefill);
       }
-      showNotification('Report data loaded');
+      showNotification(`Report data loaded${compareOn ? '' : ' (no comparison)'}`);
       setTimeout(() => previewRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
     } catch (err) {
       showNotification(err?.message || 'Failed to load data', 'error');
     }
-  }, [accountSelections, saveAccounts, fetchReportData, reportFrom, reportTo, compareFrom, compareTo, sections, showNotification]);
+  }, [accountSelections, saveAccounts, fetchReportData, reportFrom, reportTo, compareOn, compareFrom, compareTo, sections, showNotification, slideData?.slide3Prefill]);
 
   useEffect(() => {
     if (slideData?.slide3Prefill && !getSectionText(sections, 'slide3_leads', '')) {
@@ -365,8 +375,22 @@ export function MonthlyReportEditor({ reportId, onBack }) {
                     compareTo={compareTo}
                     onApply={handleDatePickerApply}
                   />
+                  <div className="mr-compare-toggle-row">
+                    <label className="mr-compare-toggle">
+                      <input
+                        type="checkbox"
+                        checked={compareOn}
+                        disabled={isPublished}
+                        onChange={(e) => setCompareOn(e.target.checked)}
+                      />
+                      <span>Include comparison period in slides</span>
+                    </label>
+                    <span className={`badge ${compareOn ? 'badge-green' : 'badge-muted'}`}>
+                      Comparison: {compareOn ? 'ON' : 'OFF'}
+                    </span>
+                  </div>
                   <p className="mr-config-dates-hint">
-                    Report month uses the 1st through last day (e.g. Apr 1–30, 2026). Comparison is the prior full month (Mar 1–31, 2026).
+                    Report month uses the 1st through last day (e.g. Apr 1–30, 2026). When comparison is on, the prior full month is used by default. Turn off to hide comparison columns/cards across all slides.
                   </p>
                 </div>
               </div>

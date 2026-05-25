@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabaseClient';
+import { sbFetchAllParallel, buildQuery } from '../lib/supabaseRest';
 import {
   momChange,
   formatChangePct,
@@ -52,12 +53,14 @@ async function ga4InvokeErrorMessage(error, data) {
 
 async function fetchGadsTotals(customerIds, from, to) {
   if (!customerIds.length) return { cost: 0, clicks: 0, conversions: 0, impressions: 0 };
-  const { data } = await supabase
-    .from('gads_campaign_daily')
-    .select('cost, clicks, conversions, impressions')
-    .in('customer_id', customerIds)
-    .gte('date', from)
-    .lte('date', to);
+  // Use sbFetchAllParallel + buildQuery so we:
+  //   1) auto-paginate past the Supabase 1000-row cap (otherwise totals get silently truncated
+  //      for clients with many campaigns × days), and
+  //   2) match the Google Ads page's customer-id handling (both dashed/undashed variants).
+  // The `id.asc` tiebreaker keeps pagination deterministic so rows can't be skipped or duplicated.
+  const data = await sbFetchAllParallel(buildQuery('gads_campaign_daily', {
+    customerIds, dateFrom: from, dateTo: to, extra: '&order=date.desc,id.asc',
+  }));
   let cost = 0, clicks = 0, conversions = 0, impressions = 0;
   (data || []).forEach((r) => {
     cost += num(r.cost);
@@ -206,7 +209,7 @@ function isOrganicSearchRow(row) {
 }
 
 /** Live GA4 totals via edge function (current + previous in one call per property). */
-async function fetchGa4TotalsPair(customerIds, currentFrom, currentTo, prevFrom, prevTo) {
+async function fetchGa4TotalsPair(customerIds, currentFrom, currentTo, prevFrom, prevTo, includeCompare = true) {
   if (!customerIds.length) {
     const empty = { users: 0, sessions: 0, pageViews: 0, bounceRate: 0, avgSessionDuration: 0, pagesPerSession: 0 };
     return { current: empty, previous: empty, rawRows: [] };
@@ -216,8 +219,9 @@ async function fetchGa4TotalsPair(customerIds, currentFrom, currentTo, prevFrom,
       invokeGa4Realtime(customer_id, {
         date_from: currentFrom,
         date_to: currentTo,
-        compare_date_from: prevFrom,
-        compare_date_to: prevTo,
+        ...(includeCompare && prevFrom && prevTo
+          ? { compare_date_from: prevFrom, compare_date_to: prevTo }
+          : {}),
         breakdown: 'none',
       }),
     ),
@@ -295,12 +299,12 @@ async function fetchGa4SearchOverviewMetrics(customerIds, from, to, overallTotal
 
 async function fetchTopKeywords(customerIds, from, to, limit = 10) {
   if (!customerIds.length) return [];
-  const { data } = await supabase
-    .from('gads_keyword_daily')
-    .select('keyword_text, cost, conversions, clicks')
-    .in('customer_id', customerIds)
-    .gte('date', from)
-    .lte('date', to);
+  // Same reasoning as fetchGadsTotals: clients with many keywords × days easily exceed the
+  // 1000-row Supabase default cap, which was silently truncating keyword totals (e.g. PPT
+  // showing 55 conv for "Urgent Care Center" while the GAds page showed 57).
+  const data = await sbFetchAllParallel(buildQuery('gads_keyword_daily', {
+    customerIds, dateFrom: from, dateTo: to, extra: '&order=date.desc,id.asc',
+  }));
 
   const map = new Map();
   (data || []).forEach((r) => {
@@ -314,7 +318,7 @@ async function fetchTopKeywords(customerIds, from, to, limit = 10) {
   return [...map.values()].sort((a, b) => b.conversions - a.conversions || b.cost - a.cost).slice(0, limit);
 }
 
-async function fetchGhlLeadRows(accounts, from, to, prevFrom, prevTo) {
+async function fetchGhlLeadRows(accounts, from, to, prevFrom, prevTo, includeCompare = true) {
   const rows = [];
   for (const acc of accounts || []) {
     const cpa = acc.client_platform_accounts;
@@ -326,13 +330,26 @@ async function fetchGhlLeadRows(accounts, from, to, prevFrom, prevTo) {
     const prevStartTs = `${prevFrom}T00:00:00`;
     const prevEndTs = `${prevTo}T23:59:59.999`;
 
-    const [calls, forms, chat, prevCalls, prevForms, prevChat] = await Promise.all([
+    const currentRequests = [
       supabase.from('ghl_calls_view').select('*', { count: 'exact', head: true }).eq('location_id', cid).gte('date_added', startTs).lte('date_added', endTs),
       supabase.from('ghl_form_submissions_view').select('*', { count: 'exact', head: true }).eq('location_id', cid).eq('form_type', 'form_submission').gte('date_added', startTs).lte('date_added', endTs),
       supabase.from('ghl_form_submissions_view').select('*', { count: 'exact', head: true }).eq('location_id', cid).eq('form_type', 'chat_widget').gte('date_added', startTs).lte('date_added', endTs),
-      supabase.from('ghl_calls_view').select('*', { count: 'exact', head: true }).eq('location_id', cid).gte('date_added', prevStartTs).lte('date_added', prevEndTs),
-      supabase.from('ghl_form_submissions_view').select('*', { count: 'exact', head: true }).eq('location_id', cid).eq('form_type', 'form_submission').gte('date_added', prevStartTs).lte('date_added', prevEndTs),
-      supabase.from('ghl_form_submissions_view').select('*', { count: 'exact', head: true }).eq('location_id', cid).eq('form_type', 'chat_widget').gte('date_added', prevStartTs).lte('date_added', prevEndTs),
+    ];
+    const compareRequests = includeCompare && prevFrom && prevTo
+      ? [
+          supabase.from('ghl_calls_view').select('*', { count: 'exact', head: true }).eq('location_id', cid).gte('date_added', prevStartTs).lte('date_added', prevEndTs),
+          supabase.from('ghl_form_submissions_view').select('*', { count: 'exact', head: true }).eq('location_id', cid).eq('form_type', 'form_submission').gte('date_added', prevStartTs).lte('date_added', prevEndTs),
+          supabase.from('ghl_form_submissions_view').select('*', { count: 'exact', head: true }).eq('location_id', cid).eq('form_type', 'chat_widget').gte('date_added', prevStartTs).lte('date_added', prevEndTs),
+        ]
+      : [
+          Promise.resolve({ count: 0 }),
+          Promise.resolve({ count: 0 }),
+          Promise.resolve({ count: 0 }),
+        ];
+
+    const [calls, forms, chat, prevCalls, prevForms, prevChat] = await Promise.all([
+      ...currentRequests,
+      ...compareRequests,
     ]);
 
     rows.push({
@@ -500,10 +517,13 @@ function buildSlide7(channels) {
   return { table: rows };
 }
 
-export async function buildMonthlySlideData(accounts, dateRanges) {
+export async function buildMonthlySlideData(accounts, dateRanges, options = {}) {
   const { currentFrom, currentTo, prevFrom, prevTo } = dateRanges;
+  const compareOn = options.compareOn !== false;
   const currentLabel = formatMonthLabel(currentFrom);
-  const previousLabel = formatMonthLabel(prevFrom);
+  const previousLabel = compareOn ? formatMonthLabel(prevFrom) : '';
+  const currentShortLabel = formatShortMonthLabel(currentFrom);
+  const previousShortLabel = compareOn ? formatShortMonthLabel(prevFrom) : '';
 
   const gadsIds = getAccountIds(accounts, 'google_ads');
   const ga4Ids = getAccountIds(accounts, 'ga4');
@@ -516,12 +536,14 @@ export async function buildMonthlySlideData(accounts, dateRanges) {
       currentTo,
       prevFrom,
       prevTo,
+      compareOn,
     });
     if (!ga4Ids.length) {
       console.warn('[GA4] No GA4 accounts linked on this report — slides 6/7 will show zeros.');
     }
   }
 
+  const emptyGadsTotals = { cost: 0, clicks: 0, conversions: 0, impressions: 0 };
   const [
     curGads,
     prevGads,
@@ -530,10 +552,10 @@ export async function buildMonthlySlideData(accounts, dateRanges) {
     ghlRows,
   ] = await Promise.all([
     fetchGadsTotals(gadsIds, currentFrom, currentTo),
-    fetchGadsTotals(gadsIds, prevFrom, prevTo),
-    fetchGa4TotalsPair(ga4Ids, currentFrom, currentTo, prevFrom, prevTo),
+    compareOn ? fetchGadsTotals(gadsIds, prevFrom, prevTo) : Promise.resolve(emptyGadsTotals),
+    fetchGa4TotalsPair(ga4Ids, currentFrom, currentTo, prevFrom, prevTo, compareOn),
     fetchTopKeywords(gadsIds, currentFrom, currentTo),
-    fetchGhlLeadRows(ghlAccounts, currentFrom, currentTo, prevFrom, prevTo),
+    fetchGhlLeadRows(ghlAccounts, currentFrom, currentTo, prevFrom, prevTo, compareOn),
   ]);
   const curGa4 = ga4Totals.current;
   const prevGa4 = ga4Totals.previous;
@@ -542,7 +564,7 @@ export async function buildMonthlySlideData(accounts, dateRanges) {
   if (import.meta.env.DEV && ga4Ids.length) {
     console.info('[GA4] Slide 6 mapping (edge current → Apr card, previous → Mar card)', {
       currentPeriod: `${currentFrom} → ${currentTo}`,
-      previousPeriod: `${prevFrom} → ${prevTo}`,
+      previousPeriod: compareOn ? `${prevFrom} → ${prevTo}` : 'disabled',
       aprilCard: { users: curGa4.users, sessions: curGa4.sessions, pageViews: curGa4.pageViews },
       marchCard: { users: prevGa4.users, sessions: prevGa4.sessions, pageViews: prevGa4.pageViews },
       rawCurrentRow: ga4Totals.rawRows?.[0] || null,
@@ -558,21 +580,26 @@ export async function buildMonthlySlideData(accounts, dateRanges) {
   const prevTotalCalls = ghlRows.reduce((s, r) => s + r.callPrevious, 0);
   const prevTotalFormsChat = ghlRows.reduce((s, r) => s + r.formsPrevious + r.chatPrevious, 0);
 
+  const baseStatBoxes = [
+    { value: String(totalCalls), label: `Total Call Leads (${currentShortLabel})` },
+    { value: String(totalFormsChat), label: `Total Forms and Chat Widgets (${currentShortLabel})` },
+  ];
+  const compareStatBoxes = compareOn ? [
+    { value: String(prevTotalCalls), label: `Total Calls (${previousShortLabel})` },
+    { value: String(prevTotalFormsChat), label: `Forms & Chat (${previousShortLabel})` },
+  ] : [];
+
   return {
+    compareOn,
     currentLabel,
     previousLabel,
-    comparisonHeader: `${formatShortMonthLabel(currentFrom)} Vs ${formatShortMonthLabel(prevFrom)}`,
+    comparisonHeader: compareOn ? `${currentShortLabel} Vs ${previousShortLabel}` : currentShortLabel,
     slide3Prefill: {
       rows: ghlRows,
-      statBoxes: [
-        { value: String(totalCalls), label: 'Total Call Leads' },
-        { value: String(totalFormsChat), label: 'Total Forms and Chat Widgets' },
-        { value: String(prevTotalCalls), label: `Total Calls (${formatShortMonthLabel(prevFrom)})` },
-        { value: String(prevTotalFormsChat), label: `Forms & Chat (${formatShortMonthLabel(prevFrom)})` },
-      ],
+      statBoxes: [...baseStatBoxes, ...compareStatBoxes],
     },
-    slide5: buildSlide5(curGads, prevGads, formatShortMonthLabel(currentFrom), formatShortMonthLabel(prevFrom)),
-    slide6: buildSlide6(curGa4, prevGa4, curGads, prevGads, formatShortMonthLabel(currentFrom), formatShortMonthLabel(prevFrom)),
+    slide5: buildSlide5(curGads, prevGads, currentShortLabel, previousShortLabel),
+    slide6: buildSlide6(curGa4, prevGa4, curGads, prevGads, currentShortLabel, previousShortLabel),
     slide7: buildSlide7(channels),
     slide8: { keywords },
   };

@@ -175,7 +175,7 @@ function EditableCell({ value, onChange, disabled, className }) {
   );
 }
 
-function Slide3({ leadData, comparisonHeader, currentLabel, previousLabel, editable, onChangeLead, monthLabel }) {
+function Slide3({ leadData, comparisonHeader, currentLabel, previousLabel, compareOn, editable, onChangeLead, monthLabel }) {
   const rows = leadData?.rows?.length ? leadData.rows : [{ location: '—', callCurrent: '', formsCurrent: '', chatCurrent: '', callPrevious: '', formsPrevious: '', chatPrevious: '' }];
   const boxes = leadData?.statBoxes || [];
 
@@ -185,16 +185,20 @@ function Slide3({ leadData, comparisonHeader, currentLabel, previousLabel, edita
     onChangeLead?.(next);
   };
 
-  const displayBoxes = boxes.length >= 4 ? boxes : [
-    { value: String(rows.reduce((s, r) => s + Number(r.callCurrent || 0), 0)), label: 'Total Call Leads' },
-    { value: String(rows.reduce((s, r) => s + Number(r.formsCurrent || 0) + Number(r.chatCurrent || 0), 0)), label: 'Total Forms and Chat Widgets' },
-    { value: String(rows.reduce((s, r) => s + Number(r.callPrevious || 0), 0)), label: `Total Calls (${previousLabel})` },
-    { value: String(rows.reduce((s, r) => s + Number(r.formsPrevious || 0) + Number(r.chatPrevious || 0), 0)), label: `Total Forms and Chat (${previousLabel})` },
+  const expectedBoxes = compareOn ? 4 : 2;
+  const fallbackBoxes = [
+    { value: String(rows.reduce((s, r) => s + Number(r.callCurrent || 0), 0)), label: `Total Call Leads (${currentLabel})` },
+    { value: String(rows.reduce((s, r) => s + Number(r.formsCurrent || 0) + Number(r.chatCurrent || 0), 0)), label: `Total Forms and Chat Widgets (${currentLabel})` },
+    ...(compareOn ? [
+      { value: String(rows.reduce((s, r) => s + Number(r.callPrevious || 0), 0)), label: `Total Calls (${previousLabel})` },
+      { value: String(rows.reduce((s, r) => s + Number(r.formsPrevious || 0) + Number(r.chatPrevious || 0), 0)), label: `Total Forms and Chat (${previousLabel})` },
+    ] : []),
   ];
+  const displayBoxes = boxes.length >= expectedBoxes ? boxes.slice(0, expectedBoxes) : fallbackBoxes;
 
   return (
     <div className="mr-slide-inner">
-      <Header title="Overall Performance Overview – Lead Summary" right={comparisonHeader || `${currentLabel} Vs ${previousLabel}`} />
+      <Header title="Overall Performance Overview – Lead Summary" right={comparisonHeader || (compareOn ? `${currentLabel} Vs ${previousLabel}` : currentLabel)} />
       <div className="mr-slide-main" style={{ padding: '10px 14px' }}>
         <div className="mr-slide-table-wrap mr-slide-table-wrap--lead">
           <table className="mr-slide-table">
@@ -204,9 +208,9 @@ function Slide3({ leadData, comparisonHeader, currentLabel, previousLabel, edita
                 <th>Call Leads ({currentLabel})</th>
                 <th>Contact Forms ({currentLabel})</th>
                 <th>Chat Widgets ({currentLabel})</th>
-                <th>Call Leads ({previousLabel})</th>
-                <th>Contact Forms ({previousLabel})</th>
-                <th>Chat Widgets ({previousLabel})</th>
+                {compareOn && <th>Call Leads ({previousLabel})</th>}
+                {compareOn && <th>Contact Forms ({previousLabel})</th>}
+                {compareOn && <th>Chat Widgets ({previousLabel})</th>}
               </tr>
             </thead>
             <tbody>
@@ -216,21 +220,21 @@ function Slide3({ leadData, comparisonHeader, currentLabel, previousLabel, edita
                   <EditableCell value={r.callCurrent} onChange={(v) => updateRow(i, 'callCurrent', v)} disabled={!editable} className="num" />
                   <EditableCell value={r.formsCurrent} onChange={(v) => updateRow(i, 'formsCurrent', v)} disabled={!editable} />
                   <EditableCell value={r.chatCurrent} onChange={(v) => updateRow(i, 'chatCurrent', v)} disabled={!editable} />
-                  <EditableCell value={r.callPrevious} onChange={(v) => updateRow(i, 'callPrevious', v)} disabled={!editable} />
-                  <EditableCell value={r.formsPrevious} onChange={(v) => updateRow(i, 'formsPrevious', v)} disabled={!editable} />
-                  <EditableCell value={r.chatPrevious} onChange={(v) => updateRow(i, 'chatPrevious', v)} disabled={!editable} />
+                  {compareOn && <EditableCell value={r.callPrevious} onChange={(v) => updateRow(i, 'callPrevious', v)} disabled={!editable} />}
+                  {compareOn && <EditableCell value={r.formsPrevious} onChange={(v) => updateRow(i, 'formsPrevious', v)} disabled={!editable} />}
+                  {compareOn && <EditableCell value={r.chatPrevious} onChange={(v) => updateRow(i, 'chatPrevious', v)} disabled={!editable} />}
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        <SubBar>Combined Totals – {previousLabel}</SubBar>
-        <div className="mr-slide-kpi-row">
-          {displayBoxes.slice(0, 4).map((box, i) => (
-            <div key={i} className={`mr-slide-kpi-card${i === 0 ? ' mr-slide-kpi-card--green' : ''}`}>
-              <div className={`mr-slide-kpi-accent mr-slide-kpi-accent--${i === 0 ? 'green' : 'dark'}`} />
+        <SubBar>Combined Totals</SubBar>
+        <div className="mr-slide-kpi-row mr-slide-kpi-row--spaced">
+          {displayBoxes.map((box, i) => (
+            <div key={i} className="mr-slide-kpi-card">
+              <div className="mr-slide-kpi-accent mr-slide-kpi-accent--dark" />
               <div className="mr-slide-kpi-body">
-                <div className={`mr-slide-kpi-value mr-slide-kpi-value--${i === 0 ? 'green' : 'dark'}`}>{box.value}</div>
+                <div className="mr-slide-kpi-value mr-slide-kpi-value--dark">{box.value}</div>
                 <div className="mr-slide-kpi-label">{box.label}</div>
               </div>
             </div>
@@ -254,7 +258,7 @@ function Slide4({ monthLabel }) {
   );
 }
 
-function Slide5({ data, clientName, monthLabel }) {
+function Slide5({ data, compareOn, clientName, monthLabel }) {
   const d = data?.slide5 || {};
   const icons = ['$', '↗', '👥', '📈'];
   const circleClass = ['mr-slide-kpi-icon-circle--blue', 'mr-slide-kpi-icon-circle--green', 'mr-slide-kpi-icon-circle--orange', 'mr-slide-kpi-icon-circle--purple'];
@@ -262,7 +266,7 @@ function Slide5({ data, clientName, monthLabel }) {
     <div className="mr-slide-inner">
       <Header title="Paid Ads Performance" right={clientName} />
       <div className="mr-slide-main">
-        <p className="mr-slide-subtitle-muted">{d.comparisonSubtitle}</p>
+        {compareOn ? <p className="mr-slide-subtitle-muted">{d.comparisonSubtitle}</p> : null}
         <div className="mr-slide-kpi-icons">
           {(d.topStats || []).map((s, i) => (
             <div key={s.label} className="mr-slide-kpi-icon-card">
@@ -277,11 +281,13 @@ function Slide5({ data, clientName, monthLabel }) {
         <div className="mr-slide-white-panel">
           <div className="mr-slide-header-with-tabs">
             <div className="mr-slide-white-panel-title">Detailed Cost &amp; Performance Breakdown</div>
-            <div className="mr-slide-tab-pills">
-              <span className="mr-slide-tab-pill mr-slide-tab-pill--active">{d.currentLabel}</span>
-              <span className="mr-slide-tab-pill">{d.previousLabel}</span>
-              <span className="mr-slide-tab-pill">Compare</span>
-            </div>
+            {compareOn ? (
+              <div className="mr-slide-tab-pills">
+                <span className="mr-slide-tab-pill mr-slide-tab-pill--active">{d.currentLabel}</span>
+                <span className="mr-slide-tab-pill">{d.previousLabel}</span>
+                <span className="mr-slide-tab-pill">Compare</span>
+              </div>
+            ) : null}
           </div>
           <div className="mr-slide-table-wrap" style={{ margin: 0 }}>
             <table className="mr-slide-table">
@@ -289,8 +295,8 @@ function Slide5({ data, clientName, monthLabel }) {
                 <tr>
                   <th>Metric</th>
                   <th>{d.currentLabel}</th>
-                  <th>{d.previousLabel}</th>
-                  <th>Change</th>
+                  {compareOn && <th>{d.previousLabel}</th>}
+                  {compareOn && <th>Change</th>}
                 </tr>
               </thead>
               <tbody>
@@ -298,8 +304,8 @@ function Slide5({ data, clientName, monthLabel }) {
                   <tr key={row.metric}>
                     <td>{row.metric}</td>
                     <td>{row.current}</td>
-                    <td>{row.previous}</td>
-                    <td className={row.positive ? 'pos' : 'neg'}>{row.change}</td>
+                    {compareOn && <td>{row.previous}</td>}
+                    {compareOn && <td className={row.positive ? 'pos' : 'neg'}>{row.change}</td>}
                   </tr>
                 ))}
               </tbody>
@@ -333,7 +339,7 @@ function MetricCard({ panel, titleColor }) {
   );
 }
 
-function Slide6({ data, clientName, monthLabel }) {
+function Slide6({ data, compareOn, clientName, monthLabel }) {
   const d = data?.slide6 || {};
   return (
     <div className="mr-slide-inner">
@@ -341,7 +347,7 @@ function Slide6({ data, clientName, monthLabel }) {
       <div className="mr-slide-main">
         <div className="mr-slide-metric-cards-row">
           {d.current && <MetricCard panel={d.current} titleColor="red" />}
-          {d.previous && <MetricCard panel={d.previous} titleColor="" />}
+          {compareOn && d.previous && <MetricCard panel={d.previous} titleColor="" />}
         </div>
         <div className="mr-slide-white-panel mr-slide-white-panel--compact">
           <div className="mr-slide-panel-title-sm">Detailed Performance Metrics</div>
@@ -351,9 +357,8 @@ function Slide6({ data, clientName, monthLabel }) {
                 <tr>
                   <th>Metric</th>
                   <th>{d.current?.label}</th>
-                  <th>{d.previous?.label}</th>
-                  <th>Change</th>
-                  <th>Status</th>
+                  {compareOn && <th>{d.previous?.label}</th>}
+                  {compareOn && <th>Change</th>}
                 </tr>
               </thead>
               <tbody>
@@ -361,9 +366,8 @@ function Slide6({ data, clientName, monthLabel }) {
                   <tr key={row.metric}>
                     <td>{row.metric}</td>
                     <td>{row.current}</td>
-                    <td>{row.previous}</td>
-                    <td className={row.positive ? 'pos' : 'neg'}>{row.change}</td>
-                    <td>{row.status}</td>
+                    {compareOn && <td>{row.previous}</td>}
+                    {compareOn && <td className={`change-cell ${row.positive ? 'pos' : 'neg'}`}>{row.change}</td>}
                   </tr>
                 ))}
               </tbody>
@@ -567,6 +571,7 @@ function Slide10({ progress, editable, onChangeProgress, monthLabel }) {
 
 function renderSlide(num, props) {
   const { clientName, monthLabel, agency, slideData, sections, editable, handlers } = props;
+  const compareOn = slideData?.compareOn !== false;
   const common = { monthLabel };
   const services = handlers.slide2 ?? parseSectionJson(sections, 'slide2_services', DEFAULT_SLIDE2_SERVICES);
   const leadData = handlers.slide3 ?? parseSectionJson(sections, 'slide3_leads', slideData?.slide3Prefill || { rows: [], statBoxes: [] });
@@ -584,14 +589,15 @@ function renderSlide(num, props) {
         comparisonHeader={slideData?.comparisonHeader}
         currentLabel={slideData?.currentLabel || monthLabel}
         previousLabel={slideData?.previousLabel || ''}
+        compareOn={compareOn}
         editable={editable}
         onChangeLead={handlers.onSlide3}
         {...common}
       />
     );
     case 4: return <Slide4 monthLabel={monthLabel} />;
-    case 5: return <Slide5 data={slideData} clientName={clientName} monthLabel={monthLabel} />;
-    case 6: return <Slide6 data={slideData} clientName={clientName} monthLabel={monthLabel} />;
+    case 5: return <Slide5 data={slideData} compareOn={compareOn} clientName={clientName} monthLabel={monthLabel} />;
+    case 6: return <Slide6 data={slideData} compareOn={compareOn} clientName={clientName} monthLabel={monthLabel} />;
     case 7: return <Slide7 data={slideData} clientName={clientName} monthLabel={monthLabel} />;
     case 8: return <Slide8 data={slideData} insights={insights} editable={editable} onChangeInsights={handlers.onSlide8} clientName={clientName} monthLabel={monthLabel} />;
     case 9: return <Slide9 auctionRows={auctionRows} notes={auctionNotes} editable={editable} onChangeRows={handlers.onSlide9data} onChangeNotes={handlers.onSlide9notes} monthLabel={monthLabel} />;

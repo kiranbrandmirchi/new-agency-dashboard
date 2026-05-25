@@ -33,7 +33,7 @@ function normalizeLeadRow(row, clientName) {
   };
 }
 
-function buildStatBoxes(rows, previousLabel) {
+function buildStatBoxes(rows, currentLabel, previousLabel, compareOn) {
   const totals = rows.reduce(
     (acc, r) => ({
       calls: acc.calls + r.callCurrent,
@@ -45,9 +45,13 @@ function buildStatBoxes(rows, previousLabel) {
     }),
     { calls: 0, forms: 0, chat: 0, prevCalls: 0, prevForms: 0, prevChat: 0 },
   );
+  const base = [
+    { value: String(totals.calls), label: `Total Call Leads (${currentLabel})` },
+    { value: String(totals.forms + totals.chat), label: `Total Forms and Chat Widgets (${currentLabel})` },
+  ];
+  if (!compareOn) return base;
   return [
-    { value: String(totals.calls), label: 'Total Call Leads' },
-    { value: String(totals.forms + totals.chat), label: 'Total Forms and Chat Widgets' },
+    ...base,
     { value: String(totals.prevCalls), label: `Total Calls (${previousLabel})` },
     { value: String(totals.prevForms + totals.prevChat), label: `Forms & Chat (${previousLabel})` },
   ];
@@ -65,12 +69,16 @@ export function buildMonthlyExportData({
   previousLabel,
   reportFrom,
   compareFrom,
+  compareOn,
 }) {
   const clientName = report?.clients?.name || 'Client';
   const monthLabel = currentLabel || formatMonthLabel(report?.report_month);
   const prevLabel = previousLabel || 'Previous Period';
   const currentShortLabel = formatPeriodShort(reportFrom || report?.report_month);
   const previousShortLabel = formatPeriodShort(compareFrom) || formatPeriodShort(prevLabel);
+  const cmpOn = compareOn !== undefined
+    ? !!compareOn
+    : (slideData?.compareOn !== undefined ? !!slideData.compareOn : true);
   const preparedBy = agency?.agency_name || 'Red Castle Services';
   const website = (agency?.website_url || 'redcastleservices.com').replace(/^https?:\/\//, '');
 
@@ -88,9 +96,15 @@ export function buildMonthlyExportData({
     normalizeLeadRow(r, clientName),
   );
 
-  const statBoxes = leadData.statBoxes?.length >= 4
-    ? leadData.statBoxes.map((b) => ({ value: String(b.value ?? ''), label: String(b.label ?? '') }))
-    : buildStatBoxes(leadRows, previousShortLabel);
+  const statBoxes = (() => {
+    const expected = cmpOn ? 4 : 2;
+    if (Array.isArray(leadData.statBoxes) && leadData.statBoxes.length >= expected) {
+      return leadData.statBoxes
+        .slice(0, expected)
+        .map((b) => ({ value: String(b.value ?? ''), label: String(b.label ?? '') }));
+    }
+    return buildStatBoxes(leadRows, currentShortLabel, previousShortLabel, cmpOn);
+  })();
 
   const s5 = slideData?.slide5 || {};
   const s6 = slideData?.slide6 || {};
@@ -114,16 +128,19 @@ export function buildMonthlyExportData({
     preparedBy,
     website,
     coverLogoUrl: agency?.logo_url || '/rc-logo.png',
+    compareOn: cmpOn,
     currentLabel: monthLabel,
-    previousLabel: prevLabel,
+    previousLabel: cmpOn ? prevLabel : '',
     currentShortLabel,
-    previousShortLabel,
-    comparisonHeader: slideData?.comparisonHeader || `${currentShortLabel} vs ${previousShortLabel}`,
+    previousShortLabel: cmpOn ? previousShortLabel : '',
+    comparisonHeader: cmpOn
+      ? (slideData?.comparisonHeader || `${currentShortLabel} vs ${previousShortLabel}`)
+      : currentShortLabel,
     services,
     leadSummary: {
       rows: leadRows,
       statBoxes,
-      totalsSubBar: `Combined Totals – ${prevLabel}`,
+      totalsSubBar: 'Combined Totals',
     },
     sectionDivider: {
       title: 'Digital Update',

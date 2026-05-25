@@ -10,8 +10,10 @@ import {
 
 export { getMonthRange };
 
-async function fetchPlatformDataForAccounts(accountsData, dateRanges) {
+async function fetchPlatformDataForAccounts(accountsData, dateRanges, options = {}) {
   const { currentFrom, currentTo, prevFrom, prevTo } = dateRanges;
+  const compareOn = options.compareOn !== false;
+  const emptyPrev = Promise.resolve({ data: [], count: 0 });
   const dataByAccount = {};
   let totalCost = 0, totalClicks = 0, totalImpressions = 0, totalConversions = 0;
   let prevCost = 0, prevClicks = 0, prevImpressions = 0, prevConversions = 0;
@@ -28,7 +30,9 @@ async function fetchPlatformDataForAccounts(accountsData, dateRanges) {
       const [campRes, kwRes, prevRes] = await Promise.all([
         supabase.from('gads_campaign_daily').select('*').eq('customer_id', cid).gte('date', currentFrom).lte('date', currentTo),
         supabase.from('gads_keyword_daily').select('*').eq('customer_id', cid).gte('date', currentFrom).lte('date', currentTo),
-        supabase.from('gads_campaign_daily').select('*').eq('customer_id', cid).gte('date', prevFrom).lte('date', prevTo),
+        compareOn
+          ? supabase.from('gads_campaign_daily').select('*').eq('customer_id', cid).gte('date', prevFrom).lte('date', prevTo)
+          : emptyPrev,
       ]);
 
       const campaignMap = new Map();
@@ -80,7 +84,9 @@ async function fetchPlatformDataForAccounts(accountsData, dateRanges) {
     } else if (platform === 'facebook') {
       const [campRes, prevRes] = await Promise.all([
         supabase.from('fb_campaign_daily').select('*').eq('customer_id', cid).gte('report_date', currentFrom).lte('report_date', currentTo),
-        supabase.from('fb_campaign_daily').select('*').eq('customer_id', cid).gte('report_date', prevFrom).lte('report_date', prevTo),
+        compareOn
+          ? supabase.from('fb_campaign_daily').select('*').eq('customer_id', cid).gte('report_date', prevFrom).lte('report_date', prevTo)
+          : emptyPrev,
       ]);
       const campaignMap = new Map();
       (campRes.data || []).forEach((r) => {
@@ -130,7 +136,7 @@ async function fetchPlatformDataForAccounts(accountsData, dateRanges) {
           date_to: currentTo,
           breakdown,
         };
-        if (withCompare) {
+        if (withCompare && compareOn) {
           base.compare_date_from = prevFrom;
           base.compare_date_to = prevTo;
         }
@@ -268,8 +274,12 @@ async function fetchPlatformDataForAccounts(accountsData, dateRanges) {
         supabase.from('ghl_calls_view').select('*', { count: 'exact', head: true }).eq('location_id', cid).gte('date_added', startTs).lte('date_added', endTs),
         supabase.from('ghl_form_submissions_view').select('*', { count: 'exact', head: true }).eq('location_id', cid).eq('form_type', 'form_submission').gte('date_added', startTs).lte('date_added', endTs),
         supabase.from('ghl_form_submissions_view').select('*', { count: 'exact', head: true }).eq('location_id', cid).eq('form_type', 'chat_widget').gte('date_added', startTs).lte('date_added', endTs),
-        supabase.from('ghl_calls_view').select('*', { count: 'exact', head: true }).eq('location_id', cid).gte('date_added', prevStartTs).lte('date_added', prevEndTs),
-        supabase.from('ghl_form_submissions_view').select('*', { count: 'exact', head: true }).eq('location_id', cid).gte('date_added', prevStartTs).lte('date_added', prevEndTs),
+        compareOn
+          ? supabase.from('ghl_calls_view').select('*', { count: 'exact', head: true }).eq('location_id', cid).gte('date_added', prevStartTs).lte('date_added', prevEndTs)
+          : emptyPrev,
+        compareOn
+          ? supabase.from('ghl_form_submissions_view').select('*', { count: 'exact', head: true }).eq('location_id', cid).gte('date_added', prevStartTs).lte('date_added', prevEndTs)
+          : emptyPrev,
       ]);
       const totalCalls = callsRes.count || 0;
       const totalForms = formsRes.count || 0;
@@ -367,16 +377,17 @@ export function useMonthlyReport(reportId) {
     }
   }, [reportId]);
 
-  const fetchReportData = useCallback(async (customRanges, accountsOverride) => {
+  const fetchReportData = useCallback(async (customRanges, accountsOverride, options = {}) => {
     if (!reportId || !report) return;
     const ranges = customRanges || dateRanges || getMonthRange(report.report_month);
     const accs = accountsOverride || accounts;
+    const compareOn = options.compareOn !== false;
     setDataLoading(true);
     setError(null);
     try {
       const { dataByAccount, overallKpis: ok, previousKpis: pk, momChanges: mc } =
-        await fetchPlatformDataForAccounts(accs, ranges);
-      const slides = await buildMonthlySlideData(accs, ranges);
+        await fetchPlatformDataForAccounts(accs, ranges, { compareOn });
+      const slides = await buildMonthlySlideData(accs, ranges, { compareOn });
       setPlatformData(dataByAccount);
       setOverallKpis(ok);
       setPreviousKpis(pk);
