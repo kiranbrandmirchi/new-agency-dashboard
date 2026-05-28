@@ -1595,7 +1595,7 @@ export function SettingsPage() {
                   )}
                 </div>
                 <p className="help-text" style={{ marginTop: 8 }}>
-                  Uses Google OAuth with Analytics Read scope. Reconnect with the same Google account to refresh tokens. Add GA4 properties in Admin → Clients (Property ID). Assign each property to the OAuth account that has access to it.
+                  Uses Google OAuth with Analytics, Search Console, and Business Profile read scopes. Reconnect with the same Google account to refresh tokens. Add GA4 properties in Admin → Clients (Property ID). Assign each property to the OAuth account that has access to it.
                 </p>
               </div>
 
