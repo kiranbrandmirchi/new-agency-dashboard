@@ -1,29 +1,23 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-const corsHeaders = {
+/**
+ * Bing / Microsoft Advertising OAuth + account discovery.
+ *
+ * Microsoft Identity (Entra) OAuth 2.0 with Bing Ads scope:
+ *   https://ads.microsoft.com/msads.manage offline_access
+ *
+ * Account discovery uses Customer Management v13:
+ *   POST https://clientcenter.api.bingads.microsoft.com/CustomerManagement/v13/Accounts/Search
+ *   Header: AuthenticationToken (OAuth access token), DeveloperToken
+ */ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS"
 };
-const TT_API = "https://business-api.tiktok.com/open_api/v1.3";
-/** TikTok `data` objects usually use snake_case; tolerate camelCase. */ function pickTokenString(obj, snake, camel) {
-  if (!obj || typeof obj !== "object") return null;
-  const o = obj;
-  const a = o[snake];
-  const b = o[camel];
-  if (typeof a === "string" && a.length) return a;
-  if (typeof b === "string" && b.length) return b;
-  return null;
-}
+const MS_OAUTH_SCOPE = "https://ads.microsoft.com/msads.manage offline_access";
 function expiresInSeconds(d) {
-  const n = Number(d.expires_in ?? d.expiresIn);
+  const n = Number(d.expires_in);
   if (Number.isFinite(n) && n > 60) return Math.min(n, 365 * 24 * 3600);
-  return 24 * 3600;
-}
-function scopeToText(d) {
-  const s = d.scope;
-  if (Array.isArray(s)) return s.map(String).join(" ");
-  if (typeof s === "string" && s.length) return s;
-  return "tiktok marketing api";
+  return 3600;
 }
 Deno.serve(async (req)=>{
   if (req.method === "OPTIONS") {
@@ -31,8 +25,10 @@ Deno.serve(async (req)=>{
       headers: corsHeaders
     });
   }
-  const appId = Deno.env.get("TIKTOK_APP_ID") || Deno.env.get("TIKTOK_CLIENT_ID") || "";
-  const appSecret = Deno.env.get("TIKTOK_APP_SECRET") || Deno.env.get("TIKTOK_CLIENT_SECRET") || "";
+  const clientId = Deno.env.get("BING_CLIENT_ID") || "";
+  const clientSecret = Deno.env.get("BING_CLIENT_SECRET") || "";
+  const developerToken = Deno.env.get("BING_DEVELOPER_TOKEN") || "";
+  const tenant = Deno.env.get("BING_TENANT") || "common";
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -68,10 +64,10 @@ Deno.serve(async (req)=>{
     const agencyId = profile.agency_id;
     const body = await req.json().catch(()=>({}));
     const { action } = body;
-    if (!appId || !appSecret) {
+    if (!clientId || !clientSecret || !developerToken) {
       return new Response(JSON.stringify({
-        error: "TikTok app credentials not configured",
-        detail: "Set TIKTOK_APP_ID and TIKTOK_APP_SECRET (or TIKTOK_CLIENT_ID / TIKTOK_CLIENT_SECRET) on the edge function."
+        error: "Bing app credentials not configured",
+        detail: "Set BING_CLIENT_ID, BING_CLIENT_SECRET, BING_DEVELOPER_TOKEN on the edge function."
       }), {
         status: 500,
         headers: {
@@ -80,17 +76,21 @@ Deno.serve(async (req)=>{
         }
       });
     }
+    // ================================================================
+    // ACTION: get_auth_url
+    // ================================================================
     if (action === "get_auth_url") {
       const origin = req.headers.get("origin") || req.headers.get("referer")?.replace(/\/+$/, "") || "";
       const redirectUri = body.redirect_uri || `${origin}/oauth/callback` || "http://localhost:5173/oauth/callback";
       const stateObj = JSON.stringify({
         agency_id: agencyId,
-        platform: "tiktok",
+        platform: "bing",
         redirect_uri: redirectUri
       });
-      const authUrl = `https://ads.tiktok.com/marketing_api/auth?app_id=${encodeURIComponent(appId)}` + `&state=${encodeURIComponent(stateObj)}` + `&redirect_uri=${encodeURIComponent(redirectUri)}`;
+      const authUrl = `https://login.microsoftonline.com/${encodeURIComponent(tenant)}/oauth2/v2.0/authorize` + `?client_id=${encodeURIComponent(clientId)}` + `&response_type=code` + `&redirect_uri=${encodeURIComponent(redirectUri)}` + `&response_mode=query` + `&scope=${encodeURIComponent(MS_OAUTH_SCOPE)}` + `&state=${encodeURIComponent(stateObj)}` + `&prompt=select_account`;
       return new Response(JSON.stringify({
-        url: authUrl
+        url: authUrl,
+        auth_url: authUrl
       }), {
         headers: {
           ...corsHeaders,
@@ -98,11 +98,14 @@ Deno.serve(async (req)=>{
         }
       });
     }
+    // ================================================================
+    // ACTION: exchange_code
+    // ================================================================
     if (action === "exchange_code") {
-      const authCode = body.auth_code || body.code;
-      if (!authCode) {
+      const code = body.code || body.auth_code;
+      if (!code) {
         return new Response(JSON.stringify({
-          error: "Missing auth_code / code"
+          error: "Missing authorization code"
         }), {
           status: 400,
           headers: {
@@ -111,27 +114,38 @@ Deno.serve(async (req)=>{
           }
         });
       }
-      const redirectUriForToken = typeof body.redirect_uri === "string" ? body.redirect_uri.trim() : "";
-      const tokenPayload = {
-        app_id: appId,
-        secret: appSecret,
-        auth_code: String(authCode).trim()
-      };
-      if (redirectUriForToken) {
-        tokenPayload.redirect_uri = redirectUriForToken;
+      const redirectUri = String(body.redirect_uri || "").trim();
+      if (!redirectUri) {
+        return new Response(JSON.stringify({
+          error: "Missing redirect_uri"
+        }), {
+          status: 400,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json"
+          }
+        });
       }
-      const tokenRes = await fetch(`${TT_API}/oauth2/access_token/`, {
+      const tokenForm = new URLSearchParams();
+      tokenForm.set("client_id", clientId);
+      tokenForm.set("client_secret", clientSecret);
+      tokenForm.set("code", String(code).trim());
+      tokenForm.set("redirect_uri", redirectUri);
+      tokenForm.set("grant_type", "authorization_code");
+      tokenForm.set("scope", MS_OAUTH_SCOPE);
+      const tokenRes = await fetch(`https://login.microsoftonline.com/${encodeURIComponent(tenant)}/oauth2/v2.0/token`, {
         method: "POST",
         headers: {
-          "Content-Type": "application/json"
+          "Content-Type": "application/x-www-form-urlencoded"
         },
-        body: JSON.stringify(tokenPayload)
+        body: tokenForm.toString()
       });
       const tokenJson = await tokenRes.json().catch(()=>({}));
-      if (tokenJson.code !== 0 && tokenJson.code !== undefined) {
+      if (!tokenRes.ok) {
         return new Response(JSON.stringify({
-          error: "TikTok token exchange failed",
-          detail: tokenJson.message || JSON.stringify(tokenJson)
+          error: "Bing token exchange failed",
+          detail: tokenJson.error_description || tokenJson.error || JSON.stringify(tokenJson),
+          hint: "Ensure the Azure app redirect URI matches exactly and the code has not been used."
         }), {
           status: 400,
           headers: {
@@ -140,16 +154,12 @@ Deno.serve(async (req)=>{
           }
         });
       }
-      const d = tokenJson.data ?? tokenJson;
-      const accessToken = pickTokenString(d, "access_token", "accessToken");
-      const refreshToken = pickTokenString(d, "refresh_token", "refreshToken");
-      if (!accessToken) {
-        const dataKeys = d && typeof d === "object" ? Object.keys(d).join(", ") : "";
+      const accessToken = String(tokenJson.access_token || "");
+      const refreshToken = String(tokenJson.refresh_token || "");
+      if (!accessToken || !refreshToken) {
         return new Response(JSON.stringify({
-          error: "TikTok token response missing access_token",
-          detail: tokenJson.message || tokenJson.request_id || "",
-          data_keys: dataKeys || undefined,
-          hint: "Use a fresh auth_code (single-use)."
+          error: "Bing token response missing access_token or refresh_token",
+          detail: "Make sure the consent screen was completed with the offline_access scope."
         }), {
           status: 400,
           headers: {
@@ -158,14 +168,14 @@ Deno.serve(async (req)=>{
           }
         });
       }
-      const dobj = d;
-      const expSec = expiresInSeconds(dobj);
+      const expSec = expiresInSeconds(tokenJson);
       const expiresAtIso = new Date(Date.now() + expSec * 1000).toISOString();
-      // Cannot use upsert onConflict(agency_id, platform): DB uses partial unique index
-      // uq_agency_platform_non_ga4 — Postgres reports no matching ON CONFLICT target.
-      const { data: existingCredRows, error: credSelError } = await supabase.from("agency_platform_credentials").select("id").eq("agency_id", agencyId).eq("platform", "tiktok").limit(1);
+      // ----------------------------------------------------------------
+      // Save credential row (mirror tiktok-oauth-connect: cannot use upsert
+      // onConflict(agency_id, platform) due to partial unique index).
+      // ----------------------------------------------------------------
+      const { data: existingCredRows, error: credSelError } = await supabase.from("agency_platform_credentials").select("id").eq("agency_id", agencyId).eq("platform", "bing").limit(1);
       if (credSelError) {
-        console.error("Credential lookup error:", credSelError.message);
         return new Response(JSON.stringify({
           error: credSelError.message
         }), {
@@ -180,22 +190,15 @@ Deno.serve(async (req)=>{
         is_active: true,
         connected_by: user.id,
         connected_at: new Date().toISOString(),
-        token_scopes: scopeToText(dobj)
+        token_scopes: MS_OAUTH_SCOPE,
+        oauth_refresh_token: refreshToken,
+        oauth_access_token: accessToken,
+        oauth_token_expires_at: expiresAtIso
       };
-      if (refreshToken) {
-        tokenFields.oauth_refresh_token = refreshToken;
-        tokenFields.oauth_access_token = null;
-        tokenFields.oauth_token_expires_at = null;
-      } else {
-        tokenFields.oauth_refresh_token = null;
-        tokenFields.oauth_access_token = accessToken;
-        tokenFields.oauth_token_expires_at = expiresAtIso;
-      }
       const existingCredId = existingCredRows?.[0]?.id;
       if (existingCredId) {
         const { error: credError } = await supabase.from("agency_platform_credentials").update(tokenFields).eq("id", existingCredId);
         if (credError) {
-          console.error("Credential save error:", credError.message);
           return new Response(JSON.stringify({
             error: credError.message
           }), {
@@ -209,11 +212,10 @@ Deno.serve(async (req)=>{
       } else {
         const { error: credError } = await supabase.from("agency_platform_credentials").insert({
           agency_id: agencyId,
-          platform: "tiktok",
+          platform: "bing",
           ...tokenFields
         });
         if (credError) {
-          console.error("Credential save error:", credError.message);
           return new Response(JSON.stringify({
             error: credError.message
           }), {
@@ -225,29 +227,51 @@ Deno.serve(async (req)=>{
           });
         }
       }
-      const advUrl = new URL(`${TT_API}/oauth2/advertiser/get/`);
-      advUrl.searchParams.set("app_id", appId);
-      advUrl.searchParams.set("secret", appSecret);
-      advUrl.searchParams.set("access_token", accessToken);
-      const advRes = await fetch(advUrl.toString(), {
-        method: "GET"
-      });
-      const advJson = await advRes.json().catch(()=>({}));
-      const advList = advJson?.data?.list || advJson?.data || [];
-      const discovered = [];
-      for (const row of Array.isArray(advList) ? advList : []){
-        const id = String(row.advertiser_id ?? row.advertiserId ?? row.id ?? "");
-        if (!id) continue;
-        const name = row.advertiser_name || row.advertiser_name_info || row.name || `TikTok ${id}`;
-        discovered.push({
-          id,
-          name
+      // ----------------------------------------------------------------
+      // Discover advertiser accounts via Customer Management v13.
+      // SearchAccounts with no predicates returns all accounts the user can access.
+      // ----------------------------------------------------------------
+      let discovered = [];
+      try {
+        const searchRes = await fetch("https://clientcenter.api.bingads.microsoft.com/CustomerManagement/v13/Accounts/Search", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            AuthenticationToken: accessToken,
+            DeveloperToken: developerToken
+          },
+          body: JSON.stringify({
+            Predicates: [],
+            Ordering: [
+              {
+                Field: "Id",
+                Order: "Ascending"
+              }
+            ],
+            PageInfo: {
+              Index: 0,
+              Size: 100
+            }
+          })
         });
+        const searchJson = await searchRes.json().catch(()=>({}));
+        const accounts = searchJson.Accounts || searchJson.accounts || [];
+        for (const a of accounts){
+          const id = String(a.Id ?? a.id ?? "");
+          if (!id) continue;
+          const name = String(a.Name ?? a.name ?? `Bing ${id}`);
+          discovered.push({
+            id,
+            name
+          });
+        }
+      } catch (err) {
+        console.error("Bing account search error:", err);
       }
       for (const acct of discovered){
         const { error: cpaError } = await supabase.from("client_platform_accounts").upsert({
           agency_id: agencyId,
-          platform: "tiktok",
+          platform: "bing",
           platform_customer_id: acct.id,
           account_name: acct.name,
           is_active: true
@@ -255,7 +279,7 @@ Deno.serve(async (req)=>{
           onConflict: "platform,platform_customer_id"
         });
         if (cpaError) console.error("client_platform_accounts upsert:", cpaError.message);
-        const { error: tcError } = await supabase.from("tiktok_customers").upsert({
+        const { error: bcError } = await supabase.from("bing_customers").upsert({
           customer_id: acct.id,
           account_name: acct.name,
           agency_id: agencyId,
@@ -264,14 +288,12 @@ Deno.serve(async (req)=>{
         }, {
           onConflict: "customer_id"
         });
-        if (tcError) console.error("tiktok_customers upsert:", tcError.message);
+        if (bcError) console.error("bing_customers upsert:", bcError.message);
       }
       return new Response(JSON.stringify({
         success: true,
         accounts: discovered,
-        message: `Found ${discovered.length} advertiser account(s)`,
-        token_kind: refreshToken ? "refresh" : "access_only",
-        token_note: refreshToken ? undefined : "TikTok did not return a refresh token; sync uses the access token until it expires (~24h). Reconnect in Settings when sync fails."
+        message: `Found ${discovered.length} Bing advertiser account(s)`
       }), {
         headers: {
           ...corsHeaders,
@@ -279,13 +301,16 @@ Deno.serve(async (req)=>{
         }
       });
     }
+    // ================================================================
+    // ACTION: disconnect
+    // ================================================================
     if (action === "disconnect") {
       await supabase.from("agency_platform_credentials").update({
         is_active: false,
         oauth_refresh_token: null,
         oauth_access_token: null,
         oauth_token_expires_at: null
-      }).eq("agency_id", agencyId).eq("platform", "tiktok");
+      }).eq("agency_id", agencyId).eq("platform", "bing");
       return new Response(JSON.stringify({
         success: true,
         message: "Disconnected"
@@ -306,7 +331,7 @@ Deno.serve(async (req)=>{
       }
     });
   } catch (err) {
-    console.error("tiktok-oauth-connect:", err);
+    console.error("bing-oauth-connect:", err);
     return new Response(JSON.stringify({
       error: "Internal server error",
       detail: String(err?.message || err)

@@ -73,35 +73,103 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA "extensions";
 
 
 
+CREATE OR REPLACE FUNCTION "public"."bing_metrics_sync_all"() RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+DECLARE
+  v_project_url text;
+  v_anon_key text;
+  v_rec record;
+  v_date date;
+  v_body text;
+  v_headers jsonb;
+BEGIN
+  SELECT decrypted_secret INTO v_project_url
+    FROM vault.decrypted_secrets WHERE name = 'project_url' LIMIT 1;
+  SELECT decrypted_secret INTO v_anon_key
+    FROM vault.decrypted_secrets WHERE name = 'anon_key' LIMIT 1;
+
+  IF v_project_url IS NULL OR v_anon_key IS NULL THEN
+    RAISE WARNING 'bing_metrics_sync_all: missing vault secrets project_url or anon_key';
+    RETURN;
+  END IF;
+
+  v_headers := jsonb_build_object(
+    'Content-Type', 'application/json',
+    'Authorization', 'Bearer ' || v_anon_key
+  );
+
+  FOR v_rec IN
+    SELECT cpa.platform_customer_id
+    FROM client_platform_accounts cpa
+    WHERE cpa.platform = 'bing'
+      AND cpa.is_active = true
+  LOOP
+    FOR v_date IN
+      SELECT generate_series(
+        (current_date - interval '5 days')::date,
+        (current_date - interval '1 day')::date,
+        '1 day'::interval
+      )::date
+    LOOP
+      v_body := jsonb_build_object(
+        'customer_id', v_rec.platform_customer_id,
+        'mode', 'backfill',
+        'date_from', v_date::text,
+        'date_to', v_date::text
+      )::text;
+
+      PERFORM net.http_post(
+        url := v_project_url || '/functions/v1/bing-full-sync',
+        headers := v_headers,
+        body := v_body::jsonb
+      );
+    END LOOP;
+  END LOOP;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."bing_metrics_sync_all"() OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."can_access_customer"("p_customer_id" "text") RETURNS boolean
     LANGUAGE "sql" STABLE SECURITY DEFINER
-    SET "search_path" TO 'public'
     AS $$
   SELECT
     EXISTS (
-      SELECT 1 FROM user_profiles
-      WHERE id = auth.uid() AND is_super_admin = true
+      SELECT 1
+      FROM user_profiles
+      WHERE id = auth.uid()
+        AND is_super_admin = true
     )
     OR EXISTS (
-      SELECT 1 FROM user_profiles up
-      JOIN roles r ON r.id = up.role_id
-      WHERE up.id = auth.uid()
-        AND r.role_name IN ('admin', 'manager', 'super_admin')
-        AND up.agency_id IN (
-          SELECT cpa.agency_id
-          FROM client_platform_accounts cpa
-          WHERE cpa.platform_customer_id = p_customer_id
-            AND cpa.is_active = true
-        )
-    )
-    OR EXISTS (
-      SELECT 1 FROM user_clients uc
-      JOIN client_platform_accounts cpa ON cpa.id = uc.client_id
-      WHERE uc.user_id = auth.uid()
-        AND cpa.platform_customer_id = p_customer_id
+      SELECT 1
+      FROM client_platform_accounts cpa
+      WHERE REPLACE(COALESCE(cpa.platform_customer_id, ''), '-', '') = REPLACE(COALESCE(p_customer_id, ''), '-', '')
         AND cpa.is_active = true
+        AND (
+          cpa.agency_id IN (
+            SELECT up.agency_id
+            FROM user_profiles up
+            WHERE up.id = auth.uid()
+          )
+          OR cpa.id IN (
+            SELECT uc.client_id
+            FROM user_clients uc
+            WHERE uc.user_id = auth.uid()
+          )
+          OR cpa.client_id IN (
+            SELECT assigned.client_id
+            FROM user_clients uc
+            JOIN client_platform_accounts assigned
+              ON assigned.id = uc.client_id
+            WHERE uc.user_id = auth.uid()
+              AND assigned.client_id IS NOT NULL
+          )
+        )
     );
-
 $$;
 
 
@@ -124,6 +192,45 @@ END; $$;
 
 
 ALTER FUNCTION "public"."classify_ghl_lead_type"("p_source" "text", "p_medium" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."cleanup_orphaned_all_ad_platforms"() RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    AS $$
+BEGIN
+  PERFORM public.cleanup_orphaned_gads_data();
+  PERFORM public.cleanup_orphaned_fb_data();
+  PERFORM public.cleanup_orphaned_reddit_data();
+  PERFORM public.cleanup_orphaned_tiktok_data();
+  PERFORM public.cleanup_orphaned_bing_data();
+END;
+$$;
+
+
+ALTER FUNCTION "public"."cleanup_orphaned_all_ad_platforms"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."cleanup_orphaned_bing_data"() RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    AS $$
+BEGIN
+  DELETE FROM bing_campaign_daily WHERE customer_id NOT IN (
+    SELECT platform_customer_id FROM client_platform_accounts WHERE platform = 'bing' AND is_active = true);
+  DELETE FROM bing_keyword_daily WHERE customer_id NOT IN (
+    SELECT platform_customer_id FROM client_platform_accounts WHERE platform = 'bing' AND is_active = true);
+  DELETE FROM bing_search_term_daily WHERE customer_id NOT IN (
+    SELECT platform_customer_id FROM client_platform_accounts WHERE platform = 'bing' AND is_active = true);
+  DELETE FROM bing_ad_daily WHERE customer_id NOT IN (
+    SELECT platform_customer_id FROM client_platform_accounts WHERE platform = 'bing' AND is_active = true);
+  DELETE FROM bing_geo_location_daily WHERE customer_id NOT IN (
+    SELECT platform_customer_id FROM client_platform_accounts WHERE platform = 'bing' AND is_active = true);
+  DELETE FROM bing_customers WHERE customer_id NOT IN (
+    SELECT platform_customer_id FROM client_platform_accounts WHERE platform = 'bing' AND is_active = true);
+END;
+$$;
+
+
+ALTER FUNCTION "public"."cleanup_orphaned_bing_data"() OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."cleanup_orphaned_fb_data"() RETURNS "void"
@@ -193,6 +300,36 @@ $$;
 ALTER FUNCTION "public"."cleanup_orphaned_reddit_data"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."cleanup_orphaned_tiktok_data"() RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    AS $$
+BEGIN
+  DELETE FROM tiktok_campaign_daily WHERE customer_id NOT IN (
+    SELECT platform_customer_id FROM client_platform_accounts WHERE platform = 'tiktok' AND is_active = true);
+  DELETE FROM tiktok_placement_daily WHERE customer_id NOT IN (
+    SELECT platform_customer_id FROM client_platform_accounts WHERE platform = 'tiktok' AND is_active = true);
+END;
+$$;
+
+
+ALTER FUNCTION "public"."cleanup_orphaned_tiktok_data"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."extract_url_path"("full_url" "text") RETURNS "text"
+    LANGUAGE "sql" IMMUTABLE
+    AS $$
+  SELECT CASE
+    WHEN full_url IS NULL THEN NULL
+    WHEN full_url ~ '^https?://' THEN regexp_replace(full_url, '^https?://[^/]+', '')
+    ELSE full_url
+  END;
+
+$$;
+
+
+ALTER FUNCTION "public"."extract_url_path"("full_url" "text") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."fb_metrics_sync_all"() RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     AS $$
@@ -257,362 +394,225 @@ $$;
 ALTER FUNCTION "public"."fb_metrics_sync_all"() OWNER TO "postgres";
 
 
-CREATE OR REPLACE FUNCTION "public"."ga4_advanced_report"("p_customer_id" "text", "p_report_month" "text") RETURNS "jsonb"
-    LANGUAGE "plpgsql"
+CREATE OR REPLACE FUNCTION "public"."ga4_advanced_report"("p_customer_id" "text", "p_date_from" "date", "p_date_to" "date") RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
     AS $$
 DECLARE
-  v_from DATE;
-  v_to DATE;
-  v_pagetypes JSONB;
-  v_pagetypes_drilldown JSONB;
-  v_vdp_channel JSONB;
-  v_vdp_campaign_google JSONB;
-  v_vdp_condition JSONB;
-  v_vdp_make JSONB;
-  v_vdp_model JSONB;
-  v_vdp_rvtype JSONB;
+  result jsonb := '{}'::jsonb;
+  v_has_hoot boolean := false;
+  v_client_id uuid;
 BEGIN
-  SET LOCAL statement_timeout = '15s';
+  SELECT cpa.client_id INTO v_client_id
+  FROM public.client_platform_accounts cpa
+  WHERE cpa.platform_customer_id = p_customer_id AND cpa.platform = 'ga4' LIMIT 1;
 
-  v_from := (p_report_month || '-01')::date;
-  v_to := (v_from + interval '1 month' - interval '1 day')::date;
-  IF v_to > CURRENT_DATE - 1 THEN
-    v_to := CURRENT_DATE - 1;
+  IF v_client_id IS NOT NULL THEN
+    SELECT EXISTS(
+      SELECT 1 FROM public.hoot_inventory WHERE client_id = v_client_id AND is_active = true LIMIT 1
+    ) INTO v_has_hoot;
   END IF;
 
-  -- PAGETYPES
-  SELECT COALESCE(jsonb_agg(jsonb_build_object(
-    'page_type', t.page_type, 'page_views', t.page_views,
-    'total_users', t.total_users, 'sessions', t.sessions,
-    'pct_views', ROUND(t.page_views::numeric / NULLIF(t.total_views, 0) * 100, 2)
-  ) ORDER BY t.page_views DESC), '[]'::jsonb) INTO v_pagetypes
-  FROM (
-    SELECT COALESCE(page_type, 'Unclassified') AS page_type,
-           SUM(page_views) AS page_views, SUM(total_users) AS total_users,
-           SUM(sessions) AS sessions, SUM(SUM(page_views)) OVER () AS total_views
-    FROM ga4_raw
-    WHERE customer_id = p_customer_id AND report_date BETWEEN v_from AND v_to
-    GROUP BY COALESCE(page_type, 'Unclassified')
-  ) t;
+  -- 1. PAGE TYPES (VDP_New, VDP_Used, VDP, Non-VDP)
+  result := jsonb_build_object('pagetypes', (
+    SELECT COALESCE(jsonb_agg(row_to_json(t)::jsonb), '[]'::jsonb) FROM (
+      SELECT page_type,
+        SUM(page_views)::bigint AS page_views, SUM(total_users)::bigint AS total_users,
+        SUM(sessions)::bigint AS sessions, SUM(new_users)::bigint AS new_users,
+        COUNT(DISTINCT page_path) AS unique_pages,
+        CASE WHEN SUM(sessions)>0 THEN ROUND((SUM(bounce_rate::numeric*sessions)/SUM(sessions))::numeric,4) ELSE 0 END AS bounce_rate,
+        CASE WHEN SUM(sessions)>0 THEN ROUND((SUM(avg_session_duration::numeric*sessions)/SUM(sessions))::numeric,2) ELSE 0 END AS avg_session_duration,
+        SUM(engaged_sessions)::bigint AS engaged_sessions,
+        CASE WHEN SUM(sessions)>0 THEN ROUND((SUM(engagement_rate::numeric*sessions)/SUM(sessions))::numeric,4) ELSE 0 END AS engagement_rate,
+        SUM(event_count)::bigint AS event_count, SUM(COALESCE(key_events,0))::bigint AS key_events
+      FROM public.ga4_raw
+      WHERE customer_id=p_customer_id AND report_date BETWEEN p_date_from AND p_date_to AND page_type IS NOT NULL
+      GROUP BY page_type ORDER BY SUM(page_views) DESC
+    ) t
+  ));
 
-  -- PAGETYPES_DRILLDOWN
-  SELECT COALESCE(jsonb_agg(jsonb_build_object(
-    'page_type', t.page_type, 'total_views', t.total_views, 'pages', t.pages
-  ) ORDER BY t.total_views DESC), '[]'::jsonb) INTO v_pagetypes_drilldown
-  FROM (
-    SELECT page_type, SUM(page_views) AS total_views,
-           jsonb_agg(jsonb_build_object(
-             'page_path', page_path, 'page_title', page_title,
-             'page_views', page_views, 'total_users', total_users, 'sessions', sessions
-           ) ORDER BY page_views DESC) AS pages
-    FROM (
-      SELECT COALESCE(page_type, 'Unclassified') AS page_type, page_path,
-             MAX(page_title) AS page_title,
-             SUM(page_views) AS page_views, SUM(total_users) AS total_users, SUM(sessions) AS sessions
-      FROM ga4_raw
-      WHERE customer_id = p_customer_id AND report_date BETWEEN v_from AND v_to
-      GROUP BY COALESCE(page_type, 'Unclassified'), page_path
-    ) sub
-    GROUP BY page_type
-  ) t;
+  -- 2. DRILLDOWN
+  result := result || jsonb_build_object('pagetypes_drilldown', (
+    SELECT COALESCE(jsonb_agg(row_to_json(t)::jsonb), '[]'::jsonb) FROM (
+      SELECT page_type, SUM(page_views)::bigint AS total_views,
+        jsonb_agg(jsonb_build_object(
+          'page_path',page_path,'page_title',page_title,
+          'page_views',page_views,'total_users',total_users,'sessions',sessions
+        ) ORDER BY page_views DESC) AS pages
+      FROM (
+        SELECT page_type,page_path,MIN(page_title) AS page_title,
+          SUM(page_views)::bigint AS page_views,SUM(total_users)::bigint AS total_users,SUM(sessions)::bigint AS sessions
+        FROM public.ga4_raw
+        WHERE customer_id=p_customer_id AND report_date BETWEEN p_date_from AND p_date_to AND page_type IS NOT NULL
+        GROUP BY page_type,page_path
+      ) sub GROUP BY page_type ORDER BY SUM(page_views) DESC
+    ) t
+  ));
 
-  -- VDP_CHANNEL
-  SELECT COALESCE(jsonb_agg(jsonb_build_object(
-    'channel_group', t.channel_group, 'page_views', t.page_views,
-    'unique_vdps', t.unique_vdps,
-    'avg_views', ROUND(t.page_views::numeric / NULLIF(t.unique_vdps, 0), 2)
-  ) ORDER BY t.page_views DESC), '[]'::jsonb) INTO v_vdp_channel
-  FROM (
-    SELECT COALESCE(channel_group, 'Unknown') AS channel_group,
-           SUM(page_views) AS page_views, COUNT(DISTINCT page_path) AS unique_vdps
-    FROM ga4_raw
-    WHERE customer_id = p_customer_id AND report_date BETWEEN v_from AND v_to
-      AND page_type IN ('VDP_New', 'VDP_Used')
-    GROUP BY COALESCE(channel_group, 'Unknown')
-  ) t;
+  -- 3. VDP CHANNEL
+  result := result || jsonb_build_object('vdp_channel', (
+    SELECT COALESCE(jsonb_agg(row_to_json(t)::jsonb), '[]'::jsonb) FROM (
+      SELECT channel_group,
+        SUM(page_views)::bigint AS page_views, SUM(total_users)::bigint AS total_users,
+        SUM(sessions)::bigint AS sessions, SUM(new_users)::bigint AS new_users,
+        COUNT(DISTINCT page_path) AS unique_vdps,
+        CASE WHEN SUM(sessions)>0 THEN ROUND((SUM(bounce_rate::numeric*sessions)/SUM(sessions))::numeric,4) ELSE 0 END AS bounce_rate,
+        CASE WHEN SUM(sessions)>0 THEN ROUND((SUM(avg_session_duration::numeric*sessions)/SUM(sessions))::numeric,2) ELSE 0 END AS avg_session_duration,
+        SUM(engaged_sessions)::bigint AS engaged_sessions,
+        CASE WHEN SUM(sessions)>0 THEN ROUND((SUM(engagement_rate::numeric*sessions)/SUM(sessions))::numeric,4) ELSE 0 END AS engagement_rate,
+        SUM(event_count)::bigint AS event_count, SUM(COALESCE(key_events,0))::bigint AS key_events
+      FROM public.ga4_raw
+      WHERE customer_id=p_customer_id AND report_date BETWEEN p_date_from AND p_date_to
+        AND page_type IN ('VDP','VDP_New','VDP_Used')
+      GROUP BY channel_group ORDER BY SUM(page_views) DESC
+    ) t
+  ));
 
-  -- VDP_CAMPAIGN_GOOGLE
-  SELECT COALESCE(jsonb_agg(jsonb_build_object(
-    'campaign_name', t.campaign_name, 'channel_group', t.channel_group,
-    'source_medium', t.source_medium, 'page_views', t.page_views,
-    'unique_vdps', t.unique_vdps,
-    'avg_views', ROUND(t.page_views::numeric / NULLIF(t.unique_vdps, 0), 2)
-  ) ORDER BY t.page_views DESC), '[]'::jsonb) INTO v_vdp_campaign_google
-  FROM (
-    SELECT COALESCE(campaign_name, '(not set)') AS campaign_name,
-           COALESCE(channel_group, 'Unknown') AS channel_group,
-           COALESCE(source_medium, '') AS source_medium,
-           SUM(page_views) AS page_views, COUNT(DISTINCT page_path) AS unique_vdps
-    FROM ga4_raw
-    WHERE customer_id = p_customer_id AND report_date BETWEEN v_from AND v_to
-      AND page_type IN ('VDP_New', 'VDP_Used')
-      AND LOWER(channel_group) = 'paid search'
-      AND LOWER(COALESCE(source, '')) NOT LIKE '%bing%'
-      AND LOWER(COALESCE(source, '')) NOT LIKE '%microsoft%'
-    GROUP BY campaign_name, channel_group, source_medium
-  ) t;
+  -- 4. VDP GOOGLE CAMPAIGN
+  result := result || jsonb_build_object('vdp_campaign_google', (
+    SELECT COALESCE(jsonb_agg(row_to_json(t)::jsonb), '[]'::jsonb) FROM (
+      SELECT campaign_name, channel_group, source_medium,
+        SUM(page_views)::bigint AS page_views, SUM(total_users)::bigint AS total_users,
+        SUM(sessions)::bigint AS sessions, SUM(new_users)::bigint AS new_users,
+        COUNT(DISTINCT page_path) AS unique_vdps,
+        CASE WHEN SUM(sessions)>0 THEN ROUND((SUM(bounce_rate::numeric*sessions)/SUM(sessions))::numeric,4) ELSE 0 END AS bounce_rate,
+        SUM(engaged_sessions)::bigint AS engaged_sessions, SUM(COALESCE(key_events,0))::bigint AS key_events
+      FROM public.ga4_raw
+      WHERE customer_id=p_customer_id AND report_date BETWEEN p_date_from AND p_date_to
+        AND page_type IN ('VDP','VDP_New','VDP_Used') AND source_medium ILIKE '%google%'
+      GROUP BY campaign_name,channel_group,source_medium ORDER BY SUM(page_views) DESC
+    ) t
+  ));
 
-  -- VDP_CONDITION
-  SELECT COALESCE(jsonb_agg(jsonb_build_object(
-    'item_condition', t.item_condition, 'page_views', t.page_views,
-    'total_users', t.total_users, 'sessions', t.sessions
-  ) ORDER BY t.page_views DESC), '[]'::jsonb) INTO v_vdp_condition
-  FROM (
-    SELECT COALESCE(page_type, 'Unknown') AS item_condition,
-           SUM(page_views) AS page_views, SUM(total_users) AS total_users, SUM(sessions) AS sessions
-    FROM ga4_raw
-    WHERE customer_id = p_customer_id AND report_date BETWEEN v_from AND v_to
-      AND page_type IN ('VDP_New', 'VDP_Used')
-    GROUP BY page_type
-  ) t;
+  -- 5. VDP CONDITION
+  IF v_has_hoot THEN
+    result := result || jsonb_build_object('vdp_condition', (
+      SELECT COALESCE(jsonb_agg(row_to_json(t)::jsonb), '[]'::jsonb) FROM (
+        SELECT COALESCE(hi.condition,
+          CASE WHEN g.page_type='VDP_New' THEN 'New' WHEN g.page_type='VDP_Used' THEN 'Used' ELSE 'Unknown' END
+        ) AS item_condition,
+          SUM(g.page_views)::bigint AS page_views, SUM(g.total_users)::bigint AS total_users,
+          SUM(g.sessions)::bigint AS sessions, SUM(g.new_users)::bigint AS new_users,
+          COUNT(DISTINCT g.page_path) AS unique_vdps,
+          CASE WHEN SUM(g.sessions)>0 THEN ROUND((SUM(g.bounce_rate::numeric*g.sessions)/SUM(g.sessions))::numeric,4) ELSE 0 END AS bounce_rate,
+          SUM(g.engaged_sessions)::bigint AS engaged_sessions, SUM(COALESCE(g.key_events,0))::bigint AS key_events
+        FROM public.ga4_raw g
+        LEFT JOIN public.hoot_inventory hi ON hi.client_id=v_client_id AND hi.url_path=public.extract_url_path(g.page_location) AND hi.is_active=true
+        WHERE g.customer_id=p_customer_id AND g.report_date BETWEEN p_date_from AND p_date_to
+          AND g.page_type IN ('VDP','VDP_New','VDP_Used')
+        GROUP BY 1 ORDER BY SUM(g.page_views) DESC
+      ) t
+    ));
+  ELSE
+    result := result || jsonb_build_object('vdp_condition', (
+      SELECT COALESCE(jsonb_agg(row_to_json(t)::jsonb), '[]'::jsonb) FROM (
+        SELECT CASE WHEN page_type='VDP_New' THEN 'New' WHEN page_type='VDP_Used' THEN 'Used' ELSE 'Unknown' END AS item_condition,
+          SUM(page_views)::bigint AS page_views, SUM(total_users)::bigint AS total_users,
+          SUM(sessions)::bigint AS sessions, SUM(new_users)::bigint AS new_users,
+          COUNT(DISTINCT page_path) AS unique_vdps,
+          CASE WHEN SUM(sessions)>0 THEN ROUND((SUM(bounce_rate::numeric*sessions)/SUM(sessions))::numeric,4) ELSE 0 END AS bounce_rate,
+          SUM(engaged_sessions)::bigint AS engaged_sessions, SUM(COALESCE(key_events,0))::bigint AS key_events
+        FROM public.ga4_raw WHERE customer_id=p_customer_id AND report_date BETWEEN p_date_from AND p_date_to
+          AND page_type IN ('VDP','VDP_New','VDP_Used')
+        GROUP BY 1 ORDER BY SUM(page_views) DESC
+      ) t
+    ));
+  END IF;
 
-  -- VDP_MAKE
-  SELECT COALESCE(jsonb_agg(jsonb_build_object(
-    'item_make', t.item_make, 'page_views', t.page_views,
-    'unique_vdps', t.unique_vdps,
-    'avg_views', ROUND(t.page_views::numeric / NULLIF(t.unique_vdps, 0), 2)
-  ) ORDER BY t.page_views DESC), '[]'::jsonb) INTO v_vdp_make
-  FROM (
-    SELECT COALESCE(cp.item_make, 'Unknown') AS item_make,
-           SUM(r.page_views) AS page_views, COUNT(DISTINCT r.page_path) AS unique_vdps
-    FROM ga4_raw r
-    LEFT JOIN ga4_classified_pages cp ON cp.customer_id = r.customer_id AND cp.page_path = r.page_path
-    WHERE r.customer_id = p_customer_id AND r.report_date BETWEEN v_from AND v_to
-      AND r.page_type IN ('VDP_New', 'VDP_Used')
-    GROUP BY COALESCE(cp.item_make, 'Unknown')
-  ) t;
+  -- 6. VDP MAKE
+  IF v_has_hoot THEN
+    result := result || jsonb_build_object('vdp_make', (
+      SELECT COALESCE(jsonb_agg(row_to_json(t)::jsonb), '[]'::jsonb) FROM (
+        SELECT COALESCE(hi.make,'Unknown') AS item_make,
+          SUM(g.page_views)::bigint AS page_views, SUM(g.total_users)::bigint AS total_users,
+          SUM(g.sessions)::bigint AS sessions, SUM(g.new_users)::bigint AS new_users,
+          COUNT(DISTINCT g.page_path) AS unique_vdps,
+          CASE WHEN SUM(g.sessions)>0 THEN ROUND((SUM(g.bounce_rate::numeric*g.sessions)/SUM(g.sessions))::numeric,4) ELSE 0 END AS bounce_rate,
+          SUM(g.engaged_sessions)::bigint AS engaged_sessions, SUM(COALESCE(g.key_events,0))::bigint AS key_events
+        FROM public.ga4_raw g
+        LEFT JOIN public.hoot_inventory hi ON hi.client_id=v_client_id AND hi.url_path=public.extract_url_path(g.page_location) AND hi.is_active=true
+        WHERE g.customer_id=p_customer_id AND g.report_date BETWEEN p_date_from AND p_date_to
+          AND g.page_type IN ('VDP','VDP_New','VDP_Used')
+        GROUP BY COALESCE(hi.make,'Unknown') ORDER BY SUM(g.page_views) DESC
+      ) t
+    ));
+  ELSE
+    result := result || jsonb_build_object('vdp_make', '[]'::jsonb);
+  END IF;
 
-  -- VDP_MODEL
-  SELECT COALESCE(jsonb_agg(jsonb_build_object(
-    'item_make', t.item_make, 'item_model', t.item_model,
-    'page_views', t.page_views, 'unique_vdps', t.unique_vdps
-  ) ORDER BY t.page_views DESC), '[]'::jsonb) INTO v_vdp_model
-  FROM (
-    SELECT COALESCE(cp.item_make, 'Unknown') AS item_make,
-           COALESCE(cp.item_model, 'Unknown') AS item_model,
-           SUM(r.page_views) AS page_views, COUNT(DISTINCT r.page_path) AS unique_vdps
-    FROM ga4_raw r
-    LEFT JOIN ga4_classified_pages cp ON cp.customer_id = r.customer_id AND cp.page_path = r.page_path
-    WHERE r.customer_id = p_customer_id AND r.report_date BETWEEN v_from AND v_to
-      AND r.page_type IN ('VDP_New', 'VDP_Used')
-    GROUP BY COALESCE(cp.item_make, 'Unknown'), COALESCE(cp.item_model, 'Unknown')
-  ) t;
+  -- 7. VDP MODEL
+  IF v_has_hoot THEN
+    result := result || jsonb_build_object('vdp_model', (
+      SELECT COALESCE(jsonb_agg(row_to_json(t)::jsonb), '[]'::jsonb) FROM (
+        SELECT COALESCE(hi.make,'Unknown') AS item_make, COALESCE(hi.model,'Unknown') AS item_model,
+          SUM(g.page_views)::bigint AS page_views, SUM(g.total_users)::bigint AS total_users,
+          SUM(g.sessions)::bigint AS sessions, SUM(g.new_users)::bigint AS new_users,
+          COUNT(DISTINCT g.page_path) AS unique_vdps,
+          CASE WHEN SUM(g.sessions)>0 THEN ROUND((SUM(g.bounce_rate::numeric*g.sessions)/SUM(g.sessions))::numeric,4) ELSE 0 END AS bounce_rate,
+          SUM(g.engaged_sessions)::bigint AS engaged_sessions, SUM(COALESCE(g.key_events,0))::bigint AS key_events
+        FROM public.ga4_raw g
+        LEFT JOIN public.hoot_inventory hi ON hi.client_id=v_client_id AND hi.url_path=public.extract_url_path(g.page_location) AND hi.is_active=true
+        WHERE g.customer_id=p_customer_id AND g.report_date BETWEEN p_date_from AND p_date_to
+          AND g.page_type IN ('VDP','VDP_New','VDP_Used')
+        GROUP BY COALESCE(hi.make,'Unknown'),COALESCE(hi.model,'Unknown') ORDER BY SUM(g.page_views) DESC
+      ) t
+    ));
+  ELSE
+    result := result || jsonb_build_object('vdp_model', '[]'::jsonb);
+  END IF;
 
-  -- VDP_RVTYPE
-  SELECT COALESCE(jsonb_agg(jsonb_build_object(
-    'rv_type', t.rv_type, 'page_views', t.page_views, 'unique_vdps', t.unique_vdps
-  ) ORDER BY t.page_views DESC), '[]'::jsonb) INTO v_vdp_rvtype
-  FROM (
-    SELECT COALESCE(cp.rv_type, 'Unknown') AS rv_type,
-           SUM(r.page_views) AS page_views, COUNT(DISTINCT r.page_path) AS unique_vdps
-    FROM ga4_raw r
-    LEFT JOIN ga4_classified_pages cp ON cp.customer_id = r.customer_id AND cp.page_path = r.page_path
-    WHERE r.customer_id = p_customer_id AND r.report_date BETWEEN v_from AND v_to
-      AND r.page_type IN ('VDP_New', 'VDP_Used')
-    GROUP BY COALESCE(cp.rv_type, 'Unknown')
-  ) t;
+  -- 8. VDP RV TYPE
+  IF v_has_hoot THEN
+    result := result || jsonb_build_object('vdp_rvtype', (
+      SELECT COALESCE(jsonb_agg(row_to_json(t)::jsonb), '[]'::jsonb) FROM (
+        SELECT COALESCE(hi.rv_type,hi.vehicle_type,'Unknown') AS rv_type,
+          SUM(g.page_views)::bigint AS page_views, SUM(g.total_users)::bigint AS total_users,
+          SUM(g.sessions)::bigint AS sessions, SUM(g.new_users)::bigint AS new_users,
+          COUNT(DISTINCT g.page_path) AS unique_vdps,
+          CASE WHEN SUM(g.sessions)>0 THEN ROUND((SUM(g.bounce_rate::numeric*g.sessions)/SUM(g.sessions))::numeric,4) ELSE 0 END AS bounce_rate,
+          SUM(g.engaged_sessions)::bigint AS engaged_sessions, SUM(COALESCE(g.key_events,0))::bigint AS key_events
+        FROM public.ga4_raw g
+        LEFT JOIN public.hoot_inventory hi ON hi.client_id=v_client_id AND hi.url_path=public.extract_url_path(g.page_location) AND hi.is_active=true
+        WHERE g.customer_id=p_customer_id AND g.report_date BETWEEN p_date_from AND p_date_to
+          AND g.page_type IN ('VDP','VDP_New','VDP_Used')
+        GROUP BY COALESCE(hi.rv_type,hi.vehicle_type,'Unknown') ORDER BY SUM(g.page_views) DESC
+      ) t
+    ));
+  ELSE
+    result := result || jsonb_build_object('vdp_rvtype', '[]'::jsonb);
+  END IF;
 
-  RETURN jsonb_build_object(
-    'pagetypes', v_pagetypes,
-    'pagetypes_drilldown', v_pagetypes_drilldown,
-    'vdp_channel', v_vdp_channel,
-    'vdp_campaign_google', v_vdp_campaign_google,
-    'vdp_condition', v_vdp_condition,
-    'vdp_make', v_vdp_make,
-    'vdp_model', v_vdp_model,
-    'vdp_rvtype', v_vdp_rvtype
-  );
+  -- 9. VDP DAILY
+  result := result || jsonb_build_object('vdp_daily', (
+    SELECT COALESCE(jsonb_agg(row_to_json(t)::jsonb), '[]'::jsonb) FROM (
+      SELECT report_date,
+        SUM(page_views)::bigint AS page_views, SUM(total_users)::bigint AS total_users,
+        SUM(sessions)::bigint AS sessions, SUM(new_users)::bigint AS new_users,
+        COUNT(DISTINCT page_path) AS unique_vdps,
+        CASE WHEN COUNT(DISTINCT page_path)>0 THEN ROUND((SUM(page_views)::numeric/COUNT(DISTINCT page_path)),2) ELSE 0 END AS avg_views,
+        CASE WHEN SUM(sessions)>0 THEN ROUND((SUM(bounce_rate::numeric*sessions)/SUM(sessions))::numeric,4) ELSE 0 END AS bounce_rate,
+        SUM(engaged_sessions)::bigint AS engaged_sessions, SUM(COALESCE(key_events,0))::bigint AS key_events
+      FROM public.ga4_raw WHERE customer_id=p_customer_id AND report_date BETWEEN p_date_from AND p_date_to
+        AND page_type IN ('VDP','VDP_New','VDP_Used')
+      GROUP BY report_date ORDER BY report_date
+    ) t
+  ));
+
+  -- 10. Non-VDP summary by channel
+  result := result || jsonb_build_object('srp', (
+    SELECT COALESCE(jsonb_agg(row_to_json(t)::jsonb), '[]'::jsonb) FROM (
+      SELECT channel_group,
+        SUM(page_views)::bigint AS page_views, SUM(total_users)::bigint AS total_users,
+        SUM(sessions)::bigint AS sessions, SUM(new_users)::bigint AS new_users,
+        CASE WHEN SUM(sessions)>0 THEN ROUND((SUM(bounce_rate::numeric*sessions)/SUM(sessions))::numeric,4) ELSE 0 END AS bounce_rate,
+        SUM(engaged_sessions)::bigint AS engaged_sessions, SUM(COALESCE(key_events,0))::bigint AS key_events
+      FROM public.ga4_raw WHERE customer_id=p_customer_id AND report_date BETWEEN p_date_from AND p_date_to
+        AND page_type='Non-VDP'
+      GROUP BY channel_group ORDER BY SUM(page_views) DESC
+    ) t
+  ));
+
+  RETURN result;
 END;
-
-$$;
-
-
-ALTER FUNCTION "public"."ga4_advanced_report"("p_customer_id" "text", "p_report_month" "text") OWNER TO "postgres";
-
-
-CREATE OR REPLACE FUNCTION "public"."ga4_advanced_report"("p_customer_id" "text", "p_date_from" "date", "p_date_to" "date") RETURNS "jsonb"
-    LANGUAGE "plpgsql"
-    AS $$
-DECLARE
-  v_pagetypes JSONB;
-  v_pagetypes_drilldown JSONB;
-  v_vdp_channel JSONB;
-  v_vdp_campaign_google JSONB;
-  v_vdp_condition JSONB;
-  v_vdp_make JSONB;
-  v_vdp_model JSONB;
-  v_vdp_rvtype JSONB;
-  v_vdp_daily JSONB;
-BEGIN
-  SET LOCAL statement_timeout = '15s';
-
-  -- PAGETYPES
-  SELECT COALESCE(jsonb_agg(jsonb_build_object(
-    'page_type', t.page_type, 'page_views', t.page_views,
-    'total_users', t.total_users, 'sessions', t.sessions,
-    'pct_views', ROUND(t.page_views::numeric / NULLIF(t.total_views, 0) * 100, 2)
-  ) ORDER BY t.page_views DESC), '[]'::jsonb) INTO v_pagetypes
-  FROM (
-    SELECT COALESCE(page_type, 'Unclassified') AS page_type,
-           SUM(page_views) AS page_views, SUM(total_users) AS total_users,
-           SUM(sessions) AS sessions, SUM(SUM(page_views)) OVER () AS total_views
-    FROM ga4_raw
-    WHERE customer_id = p_customer_id AND report_date BETWEEN p_date_from AND p_date_to
-    GROUP BY COALESCE(page_type, 'Unclassified')
-  ) t;
-
-  -- PAGETYPES_DRILLDOWN
-  SELECT COALESCE(jsonb_agg(jsonb_build_object(
-    'page_type', t.page_type, 'total_views', t.total_views, 'pages', t.pages
-  ) ORDER BY t.total_views DESC), '[]'::jsonb) INTO v_pagetypes_drilldown
-  FROM (
-    SELECT page_type, SUM(page_views) AS total_views,
-           jsonb_agg(jsonb_build_object(
-             'page_path', page_path, 'page_title', page_title,
-             'page_views', page_views, 'total_users', total_users, 'sessions', sessions
-           ) ORDER BY page_views DESC) AS pages
-    FROM (
-      SELECT COALESCE(page_type, 'Unclassified') AS page_type, page_path,
-             MAX(page_title) AS page_title,
-             SUM(page_views) AS page_views, SUM(total_users) AS total_users, SUM(sessions) AS sessions
-      FROM ga4_raw
-      WHERE customer_id = p_customer_id AND report_date BETWEEN p_date_from AND p_date_to
-      GROUP BY COALESCE(page_type, 'Unclassified'), page_path
-    ) sub
-    GROUP BY page_type
-  ) t;
-
-  -- VDP_CHANNEL
-  SELECT COALESCE(jsonb_agg(jsonb_build_object(
-    'channel_group', t.channel_group, 'page_views', t.page_views,
-    'unique_vdps', t.unique_vdps,
-    'avg_views', ROUND(t.page_views::numeric / NULLIF(t.unique_vdps, 0), 2)
-  ) ORDER BY t.page_views DESC), '[]'::jsonb) INTO v_vdp_channel
-  FROM (
-    SELECT COALESCE(channel_group, 'Unknown') AS channel_group,
-           SUM(page_views) AS page_views, COUNT(DISTINCT page_path) AS unique_vdps
-    FROM ga4_raw
-    WHERE customer_id = p_customer_id AND report_date BETWEEN p_date_from AND p_date_to
-      AND page_type IN ('VDP_New', 'VDP_Used')
-    GROUP BY COALESCE(channel_group, 'Unknown')
-  ) t;
-
-  -- VDP_CAMPAIGN_GOOGLE
-  SELECT COALESCE(jsonb_agg(jsonb_build_object(
-    'campaign_name', t.campaign_name, 'channel_group', t.channel_group,
-    'source_medium', t.source_medium, 'page_views', t.page_views,
-    'unique_vdps', t.unique_vdps,
-    'avg_views', ROUND(t.page_views::numeric / NULLIF(t.unique_vdps, 0), 2)
-  ) ORDER BY t.page_views DESC), '[]'::jsonb) INTO v_vdp_campaign_google
-  FROM (
-    SELECT COALESCE(campaign_name, '(not set)') AS campaign_name,
-           COALESCE(channel_group, 'Unknown') AS channel_group,
-           COALESCE(source_medium, '') AS source_medium,
-           SUM(page_views) AS page_views, COUNT(DISTINCT page_path) AS unique_vdps
-    FROM ga4_raw
-    WHERE customer_id = p_customer_id AND report_date BETWEEN p_date_from AND p_date_to
-      AND page_type IN ('VDP_New', 'VDP_Used')
-      AND LOWER(channel_group) = 'paid search'
-      AND LOWER(COALESCE(source, '')) NOT LIKE '%bing%'
-      AND LOWER(COALESCE(source, '')) NOT LIKE '%microsoft%'
-    GROUP BY campaign_name, channel_group, source_medium
-  ) t;
-
-  -- VDP_CONDITION
-  SELECT COALESCE(jsonb_agg(jsonb_build_object(
-    'item_condition', t.item_condition, 'page_views', t.page_views,
-    'total_users', t.total_users, 'sessions', t.sessions
-  ) ORDER BY t.page_views DESC), '[]'::jsonb) INTO v_vdp_condition
-  FROM (
-    SELECT COALESCE(page_type, 'Unknown') AS item_condition,
-           SUM(page_views) AS page_views, SUM(total_users) AS total_users, SUM(sessions) AS sessions
-    FROM ga4_raw
-    WHERE customer_id = p_customer_id AND report_date BETWEEN p_date_from AND p_date_to
-      AND page_type IN ('VDP_New', 'VDP_Used')
-    GROUP BY page_type
-  ) t;
-
-  -- VDP_MAKE
-  SELECT COALESCE(jsonb_agg(jsonb_build_object(
-    'item_make', t.item_make, 'page_views', t.page_views,
-    'unique_vdps', t.unique_vdps,
-    'avg_views', ROUND(t.page_views::numeric / NULLIF(t.unique_vdps, 0), 2)
-  ) ORDER BY t.page_views DESC), '[]'::jsonb) INTO v_vdp_make
-  FROM (
-    SELECT COALESCE(cp.item_make, 'Unknown') AS item_make,
-           SUM(r.page_views) AS page_views, COUNT(DISTINCT r.page_path) AS unique_vdps
-    FROM ga4_raw r
-    LEFT JOIN ga4_classified_pages cp ON cp.customer_id = r.customer_id AND cp.page_path = r.page_path
-    WHERE r.customer_id = p_customer_id AND r.report_date BETWEEN p_date_from AND p_date_to
-      AND r.page_type IN ('VDP_New', 'VDP_Used')
-    GROUP BY COALESCE(cp.item_make, 'Unknown')
-  ) t;
-
-  -- VDP_MODEL
-  SELECT COALESCE(jsonb_agg(jsonb_build_object(
-    'item_make', t.item_make, 'item_model', t.item_model,
-    'page_views', t.page_views, 'unique_vdps', t.unique_vdps
-  ) ORDER BY t.page_views DESC), '[]'::jsonb) INTO v_vdp_model
-  FROM (
-    SELECT COALESCE(cp.item_make, 'Unknown') AS item_make,
-           COALESCE(cp.item_model, 'Unknown') AS item_model,
-           SUM(r.page_views) AS page_views, COUNT(DISTINCT r.page_path) AS unique_vdps
-    FROM ga4_raw r
-    LEFT JOIN ga4_classified_pages cp ON cp.customer_id = r.customer_id AND cp.page_path = r.page_path
-    WHERE r.customer_id = p_customer_id AND r.report_date BETWEEN p_date_from AND p_date_to
-      AND r.page_type IN ('VDP_New', 'VDP_Used')
-    GROUP BY COALESCE(cp.item_make, 'Unknown'), COALESCE(cp.item_model, 'Unknown')
-  ) t;
-
-  -- VDP_RVTYPE
-  SELECT COALESCE(jsonb_agg(jsonb_build_object(
-    'rv_type', t.rv_type, 'page_views', t.page_views, 'unique_vdps', t.unique_vdps
-  ) ORDER BY t.page_views DESC), '[]'::jsonb) INTO v_vdp_rvtype
-  FROM (
-    SELECT COALESCE(cp.rv_type, 'Unknown') AS rv_type,
-           SUM(r.page_views) AS page_views, COUNT(DISTINCT r.page_path) AS unique_vdps
-    FROM ga4_raw r
-    LEFT JOIN ga4_classified_pages cp ON cp.customer_id = r.customer_id AND cp.page_path = r.page_path
-    WHERE r.customer_id = p_customer_id AND r.report_date BETWEEN p_date_from AND p_date_to
-      AND r.page_type IN ('VDP_New', 'VDP_Used')
-    GROUP BY COALESCE(cp.rv_type, 'Unknown')
-  ) t;
-
-  -- VDP_DAILY
-  SELECT COALESCE(jsonb_agg(jsonb_build_object(
-    'report_date', t.report_date, 'page_views', t.page_views,
-    'unique_vdps', t.unique_vdps,
-    'avg_views', ROUND(t.page_views::numeric / NULLIF(t.unique_vdps, 0), 2),
-    'total_users', t.total_users, 'sessions', t.sessions,
-    'new_vdps', t.new_vdps, 'used_vdps', t.used_vdps
-  ) ORDER BY t.report_date), '[]'::jsonb) INTO v_vdp_daily
-  FROM (
-    SELECT report_date,
-           SUM(page_views) AS page_views,
-           COUNT(DISTINCT page_path) AS unique_vdps,
-           SUM(total_users) AS total_users,
-           SUM(sessions) AS sessions,
-           SUM(CASE WHEN page_type = 'VDP_New' THEN page_views ELSE 0 END) AS new_vdps,
-           SUM(CASE WHEN page_type = 'VDP_Used' THEN page_views ELSE 0 END) AS used_vdps
-    FROM ga4_raw
-    WHERE customer_id = p_customer_id AND report_date BETWEEN p_date_from AND p_date_to
-      AND page_type IN ('VDP_New', 'VDP_Used')
-    GROUP BY report_date
-  ) t;
-
-  RETURN jsonb_build_object(
-    'pagetypes', v_pagetypes,
-    'pagetypes_drilldown', v_pagetypes_drilldown,
-    'vdp_channel', v_vdp_channel,
-    'vdp_campaign_google', v_vdp_campaign_google,
-    'vdp_condition', v_vdp_condition,
-    'vdp_make', v_vdp_make,
-    'vdp_model', v_vdp_model,
-    'vdp_rvtype', v_vdp_rvtype,
-    'vdp_daily', v_vdp_daily
-  );
-END;
-
 $$;
 
 
@@ -1854,6 +1854,40 @@ $$;
 ALTER FUNCTION "public"."handle_new_user"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."hoot_inventory_sync_all"() RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    AS $$
+DECLARE
+  v_project_url text;
+  v_anon_key text;
+BEGIN
+  SELECT decrypted_secret INTO v_project_url
+    FROM vault.decrypted_secrets WHERE name = 'project_url' LIMIT 1;
+  SELECT decrypted_secret INTO v_anon_key
+    FROM vault.decrypted_secrets WHERE name = 'anon_key' LIMIT 1;
+
+  IF v_project_url IS NULL OR v_anon_key IS NULL THEN
+    RAISE WARNING 'hoot_inventory_sync_all: missing vault secrets';
+    RETURN;
+  END IF;
+
+  -- Call the edge function (it processes ALL active feeds)
+  PERFORM net.http_post(
+    url := v_project_url || '/functions/v1/hoot-inventory-sync',
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'Authorization', 'Bearer ' || v_anon_key
+    ),
+    body := '{}'::jsonb
+  );
+END;
+
+$$;
+
+
+ALTER FUNCTION "public"."hoot_inventory_sync_all"() OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."is_admin"() RETURNS boolean
     LANGUAGE "sql" STABLE SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -2007,6 +2041,156 @@ $$;
 
 ALTER FUNCTION "public"."reddit_metrics_sync_all"() OWNER TO "postgres";
 
+
+CREATE OR REPLACE FUNCTION "public"."tt_metrics_sync_all"() RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+DECLARE
+  v_project_url text;
+  v_anon_key text;
+  v_rec record;
+  v_date date;
+  v_body text;
+  v_headers jsonb;
+BEGIN
+  SELECT decrypted_secret INTO v_project_url
+    FROM vault.decrypted_secrets WHERE name = 'project_url' LIMIT 1;
+  SELECT decrypted_secret INTO v_anon_key
+    FROM vault.decrypted_secrets WHERE name = 'anon_key' LIMIT 1;
+
+  IF v_project_url IS NULL OR v_anon_key IS NULL THEN
+    RAISE WARNING 'tt_metrics_sync_all: missing vault secrets project_url or anon_key';
+    RETURN;
+  END IF;
+
+  v_headers := jsonb_build_object(
+    'Content-Type', 'application/json',
+    'Authorization', 'Bearer ' || v_anon_key
+  );
+
+  FOR v_rec IN
+    SELECT cpa.platform_customer_id
+    FROM client_platform_accounts cpa
+    WHERE cpa.platform = 'tiktok'
+      AND cpa.is_active = true
+  LOOP
+    FOR v_date IN
+      SELECT generate_series(
+        (current_date - interval '5 days')::date,
+        (current_date - interval '1 day')::date,
+        '1 day'::interval
+      )::date
+    LOOP
+      v_body := jsonb_build_object(
+        'customer_id', v_rec.platform_customer_id,
+        'mode', 'backfill',
+        'date_from', v_date::text,
+        'date_to', v_date::text
+      )::text;
+
+      PERFORM net.http_post(
+        url := v_project_url || '/functions/v1/tiktok-full-sync',
+        headers := v_headers,
+        body := v_body::jsonb
+      );
+    END LOOP;
+  END LOOP;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."tt_metrics_sync_all"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."vdp_backfill_one_client"("p_client_id" "uuid") RETURNS "text"
+    LANGUAGE "plpgsql"
+    AS $_$
+DECLARE
+  v_pattern text; patterns text[]; pat text; regex_pat text;
+  updated_count bigint; total_updated bigint := 0;
+BEGIN
+  SELECT vdp_url_pattern INTO v_pattern FROM public.clients WHERE id = p_client_id;
+  IF v_pattern IS NULL OR v_pattern = '' THEN
+    -- No pattern: tag everything as Non-VDP
+    UPDATE public.ga4_raw g SET page_type = 'Non-VDP'
+    FROM public.client_platform_accounts cpa
+    WHERE cpa.client_id = p_client_id AND cpa.platform = 'ga4'
+      AND g.customer_id = cpa.platform_customer_id AND g.page_type IS NULL;
+    GET DIAGNOSTICS updated_count = ROW_COUNT;
+    RETURN 'NO PATTERN: ' || updated_count || ' rows tagged Non-VDP';
+  END IF;
+
+  patterns := regexp_split_to_array(v_pattern, '\s+OR\s+');
+  FOREACH pat IN ARRAY patterns LOOP
+    regex_pat := trim(pat);
+    IF regex_pat = '' THEN CONTINUE; END IF;
+
+    IF regex_pat ~* '(/new[-/+]|/new$|new-inventory|/inventory/new)' THEN
+      UPDATE public.ga4_raw g SET page_type = 'VDP_New'
+      FROM public.client_platform_accounts cpa
+      WHERE cpa.client_id = p_client_id AND cpa.platform = 'ga4'
+        AND g.customer_id = cpa.platform_customer_id AND g.page_type IS NULL
+        AND (g.page_path ~* regex_pat OR g.page_location ~* regex_pat);
+      GET DIAGNOSTICS updated_count = ROW_COUNT;
+      total_updated := total_updated + updated_count;
+
+    ELSIF regex_pat ~* '(/used[-/+]|/used$|used-inventory|/inventory/used|pre-owned)' THEN
+      UPDATE public.ga4_raw g SET page_type = 'VDP_Used'
+      FROM public.client_platform_accounts cpa
+      WHERE cpa.client_id = p_client_id AND cpa.platform = 'ga4'
+        AND g.customer_id = cpa.platform_customer_id AND g.page_type IS NULL
+        AND (g.page_path ~* regex_pat OR g.page_location ~* regex_pat);
+      GET DIAGNOSTICS updated_count = ROW_COUNT;
+      total_updated := total_updated + updated_count;
+
+    ELSE
+      UPDATE public.ga4_raw g SET page_type = 'VDP_New'
+      FROM public.client_platform_accounts cpa
+      WHERE cpa.client_id = p_client_id AND cpa.platform = 'ga4'
+        AND g.customer_id = cpa.platform_customer_id AND g.page_type IS NULL
+        AND (g.page_path ~* regex_pat OR g.page_location ~* regex_pat)
+        AND (lower(g.page_path) ~ '(/new[-/+]|-new-|/new$|/inventory/new|new-inventory)'
+          OR lower(g.page_location) ~ '(/new[-/+]|-new-|/new$|/inventory/new)');
+      GET DIAGNOSTICS updated_count = ROW_COUNT;
+      total_updated := total_updated + updated_count;
+
+      UPDATE public.ga4_raw g SET page_type = 'VDP_Used'
+      FROM public.client_platform_accounts cpa
+      WHERE cpa.client_id = p_client_id AND cpa.platform = 'ga4'
+        AND g.customer_id = cpa.platform_customer_id AND g.page_type IS NULL
+        AND (g.page_path ~* regex_pat OR g.page_location ~* regex_pat)
+        AND (lower(g.page_path) ~ '(/used[-/+]|-used-|/used$|/inventory/used|pre-owned|used-inventory)'
+          OR lower(g.page_location) ~ '(/used[-/+]|-used-|/used$|/inventory/used|pre-owned)');
+      GET DIAGNOSTICS updated_count = ROW_COUNT;
+      total_updated := total_updated + updated_count;
+
+      UPDATE public.ga4_raw g SET page_type = 'VDP'
+      FROM public.client_platform_accounts cpa
+      WHERE cpa.client_id = p_client_id AND cpa.platform = 'ga4'
+        AND g.customer_id = cpa.platform_customer_id AND g.page_type IS NULL
+        AND (g.page_path ~* regex_pat OR g.page_location ~* regex_pat);
+      GET DIAGNOSTICS updated_count = ROW_COUNT;
+      total_updated := total_updated + updated_count;
+    END IF;
+  END LOOP;
+
+  -- Everything remaining = Non-VDP
+  UPDATE public.ga4_raw g SET page_type = 'Non-VDP'
+  FROM public.client_platform_accounts cpa
+  WHERE cpa.client_id = p_client_id AND cpa.platform = 'ga4'
+    AND g.customer_id = cpa.platform_customer_id AND g.page_type IS NULL;
+  GET DIAGNOSTICS updated_count = ROW_COUNT;
+  total_updated := total_updated + updated_count;
+
+  RETURN 'OK: ' || total_updated || ' rows updated';
+END;
+
+$_$;
+
+
+ALTER FUNCTION "public"."vdp_backfill_one_client"("p_client_id" "uuid") OWNER TO "postgres";
+
 SET default_tablespace = '';
 
 SET default_table_access_method = "heap";
@@ -2050,11 +2234,21 @@ CREATE TABLE IF NOT EXISTS "public"."agency_platform_credentials" (
     "last_sync_status" "text",
     "last_error" "text",
     "credential_label" "text" DEFAULT 'default'::"text",
-    "google_email" "text"
+    "google_email" "text",
+    "oauth_access_token" "text",
+    "oauth_token_expires_at" timestamp with time zone
 );
 
 
 ALTER TABLE "public"."agency_platform_credentials" OWNER TO "postgres";
+
+
+COMMENT ON COLUMN "public"."agency_platform_credentials"."oauth_access_token" IS 'OAuth access token when refresh_token is not issued (e.g. some TikTok Marketing API advertiser OAuth responses).';
+
+
+
+COMMENT ON COLUMN "public"."agency_platform_credentials"."oauth_token_expires_at" IS 'When oauth_access_token should be treated as expired; null if using refresh_token only.';
+
 
 
 CREATE TABLE IF NOT EXISTS "public"."agency_report_tabs" (
@@ -2072,6 +2266,234 @@ CREATE TABLE IF NOT EXISTS "public"."agency_report_tabs" (
 
 
 ALTER TABLE "public"."agency_report_tabs" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."bing_ad_daily" (
+    "id" bigint NOT NULL,
+    "customer_id" "text" NOT NULL,
+    "campaign_id" "text" NOT NULL,
+    "campaign_name" "text",
+    "ad_group_id" "text" NOT NULL,
+    "ad_group_name" "text",
+    "ad_id" "text" NOT NULL,
+    "ad_title" "text",
+    "ad_type" "text",
+    "report_date" "date" NOT NULL,
+    "impressions" bigint DEFAULT 0,
+    "clicks" bigint DEFAULT 0,
+    "spend" numeric(15,6) DEFAULT 0,
+    "conversions" integer DEFAULT 0,
+    "conversions_value" numeric(15,6) DEFAULT 0,
+    "currency" "text" DEFAULT 'USD'::"text",
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    "updated_at" timestamp with time zone DEFAULT "now"()
+);
+
+
+ALTER TABLE "public"."bing_ad_daily" OWNER TO "postgres";
+
+
+ALTER TABLE "public"."bing_ad_daily" ALTER COLUMN "id" ADD GENERATED BY DEFAULT AS IDENTITY (
+    SEQUENCE NAME "public"."bing_ad_daily_id_seq"
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."bing_campaign_daily" (
+    "id" bigint NOT NULL,
+    "customer_id" "text" NOT NULL,
+    "campaign_id" "text" NOT NULL,
+    "campaign_name" "text",
+    "ad_group_id" "text" DEFAULT ''::"text" NOT NULL,
+    "ad_group_name" "text",
+    "report_date" "date" NOT NULL,
+    "impressions" bigint DEFAULT 0,
+    "clicks" bigint DEFAULT 0,
+    "spend" numeric(15,6) DEFAULT 0,
+    "conversions" integer DEFAULT 0,
+    "conversions_value" numeric(15,6) DEFAULT 0,
+    "currency" "text" DEFAULT 'USD'::"text",
+    "country" "text" DEFAULT 'ALL'::"text" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    "updated_at" timestamp with time zone DEFAULT "now"()
+);
+
+
+ALTER TABLE "public"."bing_campaign_daily" OWNER TO "postgres";
+
+
+ALTER TABLE "public"."bing_campaign_daily" ALTER COLUMN "id" ADD GENERATED BY DEFAULT AS IDENTITY (
+    SEQUENCE NAME "public"."bing_campaign_daily_id_seq"
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."bing_customers" (
+    "id" bigint NOT NULL,
+    "customer_id" "text" NOT NULL,
+    "account_name" "text",
+    "agency_id" "uuid",
+    "currency" "text" DEFAULT 'USD'::"text",
+    "timezone" "text" DEFAULT 'UTC'::"text",
+    "last_synced_at" timestamp with time zone,
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    "updated_at" timestamp with time zone DEFAULT "now"()
+);
+
+
+ALTER TABLE "public"."bing_customers" OWNER TO "postgres";
+
+
+ALTER TABLE "public"."bing_customers" ALTER COLUMN "id" ADD GENERATED BY DEFAULT AS IDENTITY (
+    SEQUENCE NAME "public"."bing_customers_id_seq"
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."bing_geo_location_daily" (
+    "id" bigint NOT NULL,
+    "customer_id" "text" NOT NULL,
+    "campaign_id" "text" NOT NULL,
+    "campaign_name" "text",
+    "location_id" "text" DEFAULT ''::"text" NOT NULL,
+    "location_name" "text",
+    "country_code" "text",
+    "report_date" "date" NOT NULL,
+    "impressions" bigint DEFAULT 0,
+    "clicks" bigint DEFAULT 0,
+    "spend" numeric(15,6) DEFAULT 0,
+    "conversions" integer DEFAULT 0,
+    "currency" "text" DEFAULT 'USD'::"text",
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    "updated_at" timestamp with time zone DEFAULT "now"()
+);
+
+
+ALTER TABLE "public"."bing_geo_location_daily" OWNER TO "postgres";
+
+
+ALTER TABLE "public"."bing_geo_location_daily" ALTER COLUMN "id" ADD GENERATED BY DEFAULT AS IDENTITY (
+    SEQUENCE NAME "public"."bing_geo_location_daily_id_seq"
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."bing_keyword_daily" (
+    "id" bigint NOT NULL,
+    "customer_id" "text" NOT NULL,
+    "campaign_id" "text" NOT NULL,
+    "campaign_name" "text",
+    "ad_group_id" "text" NOT NULL,
+    "ad_group_name" "text",
+    "keyword_id" "text" NOT NULL,
+    "keyword_text" "text",
+    "match_type" "text",
+    "report_date" "date" NOT NULL,
+    "impressions" bigint DEFAULT 0,
+    "clicks" bigint DEFAULT 0,
+    "spend" numeric(15,6) DEFAULT 0,
+    "conversions" integer DEFAULT 0,
+    "conversions_value" numeric(15,6) DEFAULT 0,
+    "avg_position" numeric(10,2) DEFAULT 0,
+    "currency" "text" DEFAULT 'USD'::"text",
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    "updated_at" timestamp with time zone DEFAULT "now"()
+);
+
+
+ALTER TABLE "public"."bing_keyword_daily" OWNER TO "postgres";
+
+
+ALTER TABLE "public"."bing_keyword_daily" ALTER COLUMN "id" ADD GENERATED BY DEFAULT AS IDENTITY (
+    SEQUENCE NAME "public"."bing_keyword_daily_id_seq"
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."bing_search_term_daily" (
+    "id" bigint NOT NULL,
+    "customer_id" "text" NOT NULL,
+    "campaign_id" "text" NOT NULL,
+    "campaign_name" "text",
+    "ad_group_id" "text" NOT NULL,
+    "ad_group_name" "text",
+    "search_term" "text" NOT NULL,
+    "keyword_text" "text",
+    "match_type" "text",
+    "report_date" "date" NOT NULL,
+    "impressions" bigint DEFAULT 0,
+    "clicks" bigint DEFAULT 0,
+    "spend" numeric(15,6) DEFAULT 0,
+    "conversions" integer DEFAULT 0,
+    "currency" "text" DEFAULT 'USD'::"text",
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    "updated_at" timestamp with time zone DEFAULT "now"()
+);
+
+
+ALTER TABLE "public"."bing_search_term_daily" OWNER TO "postgres";
+
+
+ALTER TABLE "public"."bing_search_term_daily" ALTER COLUMN "id" ADD GENERATED BY DEFAULT AS IDENTITY (
+    SEQUENCE NAME "public"."bing_search_term_daily_id_seq"
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."client_hoot_feeds" (
+    "id" bigint NOT NULL,
+    "client_id" "uuid" NOT NULL,
+    "hoot_url" "text" NOT NULL,
+    "is_active" boolean DEFAULT true NOT NULL,
+    "last_fetched_at" timestamp with time zone,
+    "last_row_count" integer DEFAULT 0,
+    "last_error" "text",
+    "created_at" timestamp with time zone DEFAULT "now"()
+);
+
+
+ALTER TABLE "public"."client_hoot_feeds" OWNER TO "postgres";
+
+
+ALTER TABLE "public"."client_hoot_feeds" ALTER COLUMN "id" ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME "public"."client_hoot_feeds_id_seq"
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
 
 
 CREATE TABLE IF NOT EXISTS "public"."client_platform_accounts" (
@@ -2383,40 +2805,6 @@ ALTER SEQUENCE "public"."fb_placement_daily_id_seq" OWNED BY "public"."fb_placem
 
 
 
-CREATE TABLE IF NOT EXISTS "public"."ga4_classified_pages" (
-    "id" bigint NOT NULL,
-    "customer_id" "text" NOT NULL,
-    "agency_id" "uuid",
-    "page_path" "text" NOT NULL,
-    "page_title" "text",
-    "page_type" "text" DEFAULT 'Other'::"text",
-    "item_condition" "text",
-    "item_year" integer,
-    "item_make" "text",
-    "item_model" "text",
-    "item_floorplan" "text",
-    "rv_type" "text",
-    "platform_used" "text",
-    "rule_matched" "text",
-    "classified_at" timestamp with time zone DEFAULT "now"(),
-    "enriched_at" timestamp with time zone
-);
-
-
-ALTER TABLE "public"."ga4_classified_pages" OWNER TO "postgres";
-
-
-ALTER TABLE "public"."ga4_classified_pages" ALTER COLUMN "id" ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME "public"."ga4_classified_pages_id_seq"
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1
-);
-
-
-
 CREATE TABLE IF NOT EXISTS "public"."ga4_daily_summary" (
     "id" bigint NOT NULL,
     "customer_id" "text" NOT NULL,
@@ -2508,33 +2896,6 @@ ALTER TABLE "public"."ga4_monthly_reports" OWNER TO "postgres";
 
 ALTER TABLE "public"."ga4_monthly_reports" ALTER COLUMN "id" ADD GENERATED ALWAYS AS IDENTITY (
     SEQUENCE NAME "public"."ga4_monthly_reports_id_seq"
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1
-);
-
-
-
-CREATE TABLE IF NOT EXISTS "public"."ga4_page_rules" (
-    "id" bigint NOT NULL,
-    "platform" "text",
-    "customer_id" "text",
-    "page_type" "text" NOT NULL,
-    "url_pattern" "text" NOT NULL,
-    "priority" integer DEFAULT 100 NOT NULL,
-    "is_active" boolean DEFAULT true NOT NULL,
-    "notes" "text",
-    "created_at" timestamp with time zone DEFAULT "now"()
-);
-
-
-ALTER TABLE "public"."ga4_page_rules" OWNER TO "postgres";
-
-
-ALTER TABLE "public"."ga4_page_rules" ALTER COLUMN "id" ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME "public"."ga4_page_rules_id_seq"
     START WITH 1
     INCREMENT BY 1
     NO MINVALUE
@@ -3332,6 +3693,69 @@ CREATE TABLE IF NOT EXISTS "public"."gsc_daily_summary" (
 ALTER TABLE "public"."gsc_daily_summary" OWNER TO "postgres";
 
 
+CREATE TABLE IF NOT EXISTS "public"."hoot_inventory" (
+    "id" bigint NOT NULL,
+    "client_id" "uuid" NOT NULL,
+    "vin" "text" NOT NULL,
+    "url" "text" NOT NULL,
+    "url_path" "text" GENERATED ALWAYS AS ("regexp_replace"("url", '^https?://[^/]+'::"text", ''::"text")) STORED,
+    "condition" "text",
+    "year" integer,
+    "make" "text",
+    "model" "text",
+    "trim" "text",
+    "color" "text",
+    "price" numeric(12,2),
+    "msrp" numeric(12,2),
+    "discount" numeric(12,2),
+    "rv_type" "text",
+    "vehicle_type" "text",
+    "title" "text",
+    "stock_number" "text",
+    "location" "text",
+    "mileage" numeric(12,1),
+    "image_url" "text",
+    "fuel_type" "text",
+    "drivetrain" "text",
+    "transmission" "text",
+    "doors" integer,
+    "advertiser_name" "text",
+    "first_seen_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "last_seen_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "is_active" boolean DEFAULT true NOT NULL
+);
+
+
+ALTER TABLE "public"."hoot_inventory" OWNER TO "postgres";
+
+
+ALTER TABLE "public"."hoot_inventory" ALTER COLUMN "id" ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME "public"."hoot_inventory_id_seq"
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+
+CREATE OR REPLACE VIEW "public"."merged_migration_data" AS
+ SELECT "t2"."name" AS "customer_name",
+    "t2"."website_platform",
+    "t1"."hoot_url",
+    "t1"."is_active",
+    NULL::"text" AS "ga4_customer_id",
+    NULL::"text" AS "ga4_property_id",
+    NULL::"text" AS "hoot_id"
+   FROM ("public"."client_hoot_feeds" "t1"
+     JOIN "public"."clients" "t2" ON (("t1"."client_id" = "t2"."id")))
+  WHERE ("t2"."agency_id" = '791536a9-5c5e-439d-93c9-6be6808012ec'::"uuid");
+
+
+ALTER VIEW "public"."merged_migration_data" OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."monthly_report_accounts" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "report_id" "uuid" NOT NULL,
@@ -3611,6 +4035,77 @@ ALTER TABLE "public"."sync_log" ALTER COLUMN "id" ADD GENERATED ALWAYS AS IDENTI
 
 
 
+CREATE TABLE IF NOT EXISTS "public"."tiktok_campaign_daily" (
+    "id" bigint NOT NULL,
+    "customer_id" "text" NOT NULL,
+    "campaign_id" "text" NOT NULL,
+    "campaign_name" "text",
+    "report_date" "date" NOT NULL,
+    "impressions" bigint DEFAULT 0,
+    "clicks" bigint DEFAULT 0,
+    "spend" numeric(15,6) DEFAULT 0,
+    "purchase_views" integer DEFAULT 0,
+    "purchase_clicks" integer DEFAULT 0,
+    "purchase_total_value" numeric(15,6) DEFAULT 0,
+    "currency" "text" DEFAULT 'USD'::"text",
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    "updated_at" timestamp with time zone DEFAULT "now"(),
+    "country" "text" DEFAULT 'ALL'::"text" NOT NULL,
+    "reach" bigint DEFAULT 0,
+    "ad_group_id" "text" DEFAULT ''::"text" NOT NULL,
+    "ad_group_name" "text"
+);
+
+
+ALTER TABLE "public"."tiktok_campaign_daily" OWNER TO "postgres";
+
+
+ALTER TABLE "public"."tiktok_campaign_daily" ALTER COLUMN "id" ADD GENERATED BY DEFAULT AS IDENTITY (
+    SEQUENCE NAME "public"."tiktok_campaign_daily_id_seq"
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."tiktok_placement_daily" (
+    "id" bigint NOT NULL,
+    "customer_id" "text" NOT NULL,
+    "campaign_id" "text" NOT NULL,
+    "campaign_name" "text",
+    "placement" "text" NOT NULL,
+    "report_date" "date" NOT NULL,
+    "impressions" bigint DEFAULT 0,
+    "clicks" bigint DEFAULT 0,
+    "spend" numeric(15,6) DEFAULT 0,
+    "purchase_views" integer DEFAULT 0,
+    "purchase_clicks" integer DEFAULT 0,
+    "purchase_total_value" numeric(15,6) DEFAULT 0,
+    "currency" "text" DEFAULT 'USD'::"text",
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    "updated_at" timestamp with time zone DEFAULT "now"(),
+    "country" "text" DEFAULT 'ALL'::"text",
+    "reach" bigint DEFAULT 0
+);
+
+
+ALTER TABLE "public"."tiktok_placement_daily" OWNER TO "postgres";
+
+
+ALTER TABLE "public"."tiktok_placement_daily" ALTER COLUMN "id" ADD GENERATED BY DEFAULT AS IDENTITY (
+    SEQUENCE NAME "public"."tiktok_placement_daily_id_seq"
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+
 CREATE TABLE IF NOT EXISTS "public"."user_clients" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "user_id" "uuid" NOT NULL,
@@ -3705,6 +4200,51 @@ ALTER TABLE ONLY "public"."agency_report_tabs"
 
 
 
+ALTER TABLE ONLY "public"."bing_ad_daily"
+    ADD CONSTRAINT "bing_ad_daily_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."bing_campaign_daily"
+    ADD CONSTRAINT "bing_campaign_daily_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."bing_customers"
+    ADD CONSTRAINT "bing_customers_customer_id_key" UNIQUE ("customer_id");
+
+
+
+ALTER TABLE ONLY "public"."bing_customers"
+    ADD CONSTRAINT "bing_customers_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."bing_geo_location_daily"
+    ADD CONSTRAINT "bing_geo_location_daily_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."bing_keyword_daily"
+    ADD CONSTRAINT "bing_keyword_daily_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."bing_search_term_daily"
+    ADD CONSTRAINT "bing_search_term_daily_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."client_hoot_feeds"
+    ADD CONSTRAINT "client_hoot_feeds_client_url_key" UNIQUE ("client_id", "hoot_url");
+
+
+
+ALTER TABLE ONLY "public"."client_hoot_feeds"
+    ADD CONSTRAINT "client_hoot_feeds_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."client_platform_accounts"
     ADD CONSTRAINT "client_platform_accounts_pkey" PRIMARY KEY ("id");
 
@@ -3750,16 +4290,6 @@ ALTER TABLE ONLY "public"."fb_placement_daily"
 
 
 
-ALTER TABLE ONLY "public"."ga4_classified_pages"
-    ADD CONSTRAINT "ga4_classified_pages_customer_id_page_path_key" UNIQUE ("customer_id", "page_path");
-
-
-
-ALTER TABLE ONLY "public"."ga4_classified_pages"
-    ADD CONSTRAINT "ga4_classified_pages_pkey" PRIMARY KEY ("id");
-
-
-
 ALTER TABLE ONLY "public"."ga4_daily_summary"
     ADD CONSTRAINT "ga4_daily_summary_pkey" PRIMARY KEY ("id");
 
@@ -3777,11 +4307,6 @@ ALTER TABLE ONLY "public"."ga4_monthly_reports"
 
 ALTER TABLE ONLY "public"."ga4_monthly_reports"
     ADD CONSTRAINT "ga4_monthly_reports_pkey" PRIMARY KEY ("id");
-
-
-
-ALTER TABLE ONLY "public"."ga4_page_rules"
-    ADD CONSTRAINT "ga4_page_rules_pkey" PRIMARY KEY ("id");
 
 
 
@@ -3975,6 +4500,16 @@ ALTER TABLE ONLY "public"."gsc_daily_summary"
 
 
 
+ALTER TABLE ONLY "public"."hoot_inventory"
+    ADD CONSTRAINT "hoot_inventory_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."hoot_inventory"
+    ADD CONSTRAINT "hoot_inventory_vin_url_key" UNIQUE ("vin", "url");
+
+
+
 ALTER TABLE ONLY "public"."monthly_report_accounts"
     ADD CONSTRAINT "monthly_report_accounts_pkey" PRIMARY KEY ("id");
 
@@ -4055,6 +4590,16 @@ ALTER TABLE ONLY "public"."sync_log"
 
 
 
+ALTER TABLE ONLY "public"."tiktok_campaign_daily"
+    ADD CONSTRAINT "tiktok_campaign_daily_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."tiktok_placement_daily"
+    ADD CONSTRAINT "tiktok_placement_daily_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."user_clients"
     ADD CONSTRAINT "user_clients_pkey" PRIMARY KEY ("id");
 
@@ -4067,6 +4612,26 @@ ALTER TABLE ONLY "public"."user_clients"
 
 ALTER TABLE ONLY "public"."user_profiles"
     ADD CONSTRAINT "user_profiles_pkey" PRIMARY KEY ("id");
+
+
+
+CREATE UNIQUE INDEX "bing_ad_daily_uq" ON "public"."bing_ad_daily" USING "btree" ("customer_id", "campaign_id", "ad_group_id", "ad_id", "report_date");
+
+
+
+CREATE UNIQUE INDEX "bing_campaign_daily_uq" ON "public"."bing_campaign_daily" USING "btree" ("customer_id", "campaign_id", "ad_group_id", "report_date");
+
+
+
+CREATE UNIQUE INDEX "bing_geo_location_daily_uq" ON "public"."bing_geo_location_daily" USING "btree" ("customer_id", "campaign_id", "location_id", "report_date");
+
+
+
+CREATE UNIQUE INDEX "bing_keyword_daily_uq" ON "public"."bing_keyword_daily" USING "btree" ("customer_id", "campaign_id", "ad_group_id", "keyword_id", "report_date");
+
+
+
+CREATE UNIQUE INDEX "bing_search_term_daily_uq" ON "public"."bing_search_term_daily" USING "btree" ("customer_id", "campaign_id", "ad_group_id", "search_term", "report_date");
 
 
 
@@ -4111,6 +4676,38 @@ CREATE INDEX "idx_ag_daily_cust_date" ON "public"."gads_adgroup_daily" USING "bt
 
 
 CREATE INDEX "idx_ag_status_cust" ON "public"."gads_adgroup_status" USING "btree" ("customer_id");
+
+
+
+CREATE INDEX "idx_bing_ad_daily_cid_date" ON "public"."bing_ad_daily" USING "btree" ("customer_id", "report_date");
+
+
+
+CREATE INDEX "idx_bing_campaign_daily_cid" ON "public"."bing_campaign_daily" USING "btree" ("customer_id");
+
+
+
+CREATE INDEX "idx_bing_campaign_daily_cid_date" ON "public"."bing_campaign_daily" USING "btree" ("customer_id", "report_date");
+
+
+
+CREATE INDEX "idx_bing_campaign_daily_date" ON "public"."bing_campaign_daily" USING "btree" ("report_date");
+
+
+
+CREATE INDEX "idx_bing_customers_agency" ON "public"."bing_customers" USING "btree" ("agency_id");
+
+
+
+CREATE INDEX "idx_bing_geo_location_daily_cid_date" ON "public"."bing_geo_location_daily" USING "btree" ("customer_id", "report_date");
+
+
+
+CREATE INDEX "idx_bing_keyword_daily_cid_date" ON "public"."bing_keyword_daily" USING "btree" ("customer_id", "report_date");
+
+
+
+CREATE INDEX "idx_bing_search_term_daily_cid_date" ON "public"."bing_search_term_daily" USING "btree" ("customer_id", "report_date");
 
 
 
@@ -4222,10 +4819,6 @@ CREATE INDEX "idx_ga4r_page_type" ON "public"."ga4_raw" USING "btree" ("page_typ
 
 
 
-CREATE INDEX "idx_gcp_customer_type" ON "public"."ga4_classified_pages" USING "btree" ("customer_id", "page_type");
-
-
-
 CREATE INDEX "idx_geo_daily_cust" ON "public"."gads_geo_location_daily" USING "btree" ("customer_id");
 
 
@@ -4314,6 +4907,30 @@ CREATE INDEX "idx_hipaa_forms_loc_date" ON "public"."ghl_hipaa_forms" USING "btr
 
 
 
+CREATE INDEX "idx_hoot_inv_client" ON "public"."hoot_inventory" USING "btree" ("client_id");
+
+
+
+CREATE INDEX "idx_hoot_inv_client_active" ON "public"."hoot_inventory" USING "btree" ("client_id", "is_active");
+
+
+
+CREATE INDEX "idx_hoot_inv_url_path" ON "public"."hoot_inventory" USING "btree" ("url_path");
+
+
+
+CREATE INDEX "idx_hoot_inv_vin" ON "public"."hoot_inventory" USING "btree" ("vin");
+
+
+
+CREATE INDEX "idx_hoot_inventory_client_active" ON "public"."hoot_inventory" USING "btree" ("client_id", "is_active");
+
+
+
+CREATE INDEX "idx_hoot_inventory_client_path" ON "public"."hoot_inventory" USING "btree" ("client_id", "url_path");
+
+
+
 CREATE INDEX "idx_kw_daily_cust" ON "public"."gads_keyword_daily" USING "btree" ("customer_id");
 
 
@@ -4339,10 +4956,6 @@ CREATE INDEX "idx_monthly_reports_agency_client" ON "public"."monthly_reports" U
 
 
 CREATE INDEX "idx_monthly_reports_report_month" ON "public"."monthly_reports" USING "btree" ("report_month");
-
-
-
-CREATE INDEX "idx_pagerules_lookup" ON "public"."ga4_page_rules" USING "btree" ("platform", "customer_id", "is_active", "priority");
 
 
 
@@ -4398,11 +5011,39 @@ CREATE INDEX "idx_sync_log_status" ON "public"."sync_log" USING "btree" ("status
 
 
 
+CREATE INDEX "idx_tiktok_campaign_daily_cid" ON "public"."tiktok_campaign_daily" USING "btree" ("customer_id");
+
+
+
+CREATE INDEX "idx_tiktok_campaign_daily_cid_date" ON "public"."tiktok_campaign_daily" USING "btree" ("customer_id", "report_date");
+
+
+
+CREATE INDEX "idx_tiktok_campaign_daily_date" ON "public"."tiktok_campaign_daily" USING "btree" ("report_date");
+
+
+
+CREATE INDEX "idx_tiktok_placement_daily_cid_date" ON "public"."tiktok_placement_daily" USING "btree" ("customer_id", "report_date");
+
+
+
+CREATE INDEX "idx_tiktok_placement_daily_date" ON "public"."tiktok_placement_daily" USING "btree" ("report_date");
+
+
+
 CREATE UNIQUE INDEX "reddit_campaign_daily_uq" ON "public"."reddit_campaign_daily" USING "btree" ("customer_id", "campaign_id", "ad_group_id", "report_date");
 
 
 
 CREATE UNIQUE INDEX "reddit_placement_daily_uq" ON "public"."reddit_placement_daily" USING "btree" ("customer_id", "campaign_id", "placement", "report_date");
+
+
+
+CREATE UNIQUE INDEX "tiktok_campaign_daily_uq" ON "public"."tiktok_campaign_daily" USING "btree" ("customer_id", "campaign_id", "ad_group_id", "report_date");
+
+
+
+CREATE UNIQUE INDEX "tiktok_placement_daily_uq" ON "public"."tiktok_placement_daily" USING "btree" ("customer_id", "campaign_id", "placement", "report_date");
 
 
 
@@ -4426,6 +5067,16 @@ ALTER TABLE ONLY "public"."agency_platform_credentials"
 
 ALTER TABLE ONLY "public"."agency_report_tabs"
     ADD CONSTRAINT "agency_report_tabs_agency_id_fkey" FOREIGN KEY ("agency_id") REFERENCES "public"."agencies"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."bing_customers"
+    ADD CONSTRAINT "bing_customers_agency_id_fkey" FOREIGN KEY ("agency_id") REFERENCES "public"."agencies"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."client_hoot_feeds"
+    ADD CONSTRAINT "client_hoot_feeds_client_id_fkey" FOREIGN KEY ("client_id") REFERENCES "public"."clients"("id") ON DELETE CASCADE;
 
 
 
@@ -4456,6 +5107,11 @@ ALTER TABLE ONLY "public"."fb_customers"
 
 ALTER TABLE ONLY "public"."ga4_raw"
     ADD CONSTRAINT "ga4_raw_agency_id_fkey" FOREIGN KEY ("agency_id") REFERENCES "public"."agencies"("id");
+
+
+
+ALTER TABLE ONLY "public"."hoot_inventory"
+    ADD CONSTRAINT "hoot_inventory_client_id_fkey" FOREIGN KEY ("client_id") REFERENCES "public"."clients"("id") ON DELETE CASCADE;
 
 
 
@@ -4658,6 +5314,14 @@ CREATE POLICY "Anyone reads roles" ON "public"."roles" FOR SELECT USING (true);
 
 
 
+CREATE POLICY "Service role full access" ON "public"."client_hoot_feeds" USING (true) WITH CHECK (true);
+
+
+
+CREATE POLICY "Service role full access" ON "public"."hoot_inventory" USING (true) WITH CHECK (true);
+
+
+
 CREATE POLICY "Super admin manages agencies" ON "public"."agencies" TO "authenticated" USING ("public"."is_super_admin"());
 
 
@@ -4825,6 +5489,55 @@ CREATE POLICY "auth_read" ON "public"."ghl_leads_daily" FOR SELECT TO "authentic
 
 
 
+ALTER TABLE "public"."bing_ad_daily" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "bing_ad_daily_select" ON "public"."bing_ad_daily" FOR SELECT USING ("public"."can_access_customer"("customer_id"));
+
+
+
+ALTER TABLE "public"."bing_campaign_daily" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "bing_campaign_daily_select" ON "public"."bing_campaign_daily" FOR SELECT USING ("public"."can_access_customer"("customer_id"));
+
+
+
+ALTER TABLE "public"."bing_customers" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "bing_customers_insert" ON "public"."bing_customers" FOR INSERT WITH CHECK ("public"."can_access_customer"("customer_id"));
+
+
+
+CREATE POLICY "bing_customers_select" ON "public"."bing_customers" FOR SELECT USING ("public"."can_access_customer"("customer_id"));
+
+
+
+ALTER TABLE "public"."bing_geo_location_daily" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "bing_geo_location_daily_select" ON "public"."bing_geo_location_daily" FOR SELECT USING ("public"."can_access_customer"("customer_id"));
+
+
+
+ALTER TABLE "public"."bing_keyword_daily" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "bing_keyword_daily_select" ON "public"."bing_keyword_daily" FOR SELECT USING ("public"."can_access_customer"("customer_id"));
+
+
+
+ALTER TABLE "public"."bing_search_term_daily" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "bing_search_term_daily_select" ON "public"."bing_search_term_daily" FOR SELECT USING ("public"."can_access_customer"("customer_id"));
+
+
+
+ALTER TABLE "public"."client_hoot_feeds" ENABLE ROW LEVEL SECURITY;
+
+
 ALTER TABLE "public"."client_platform_accounts" ENABLE ROW LEVEL SECURITY;
 
 
@@ -4926,13 +5639,7 @@ CREATE POLICY "fb_placement_daily_update_policy" ON "public"."fb_placement_daily
 
 
 
-ALTER TABLE "public"."ga4_classified_pages" ENABLE ROW LEVEL SECURITY;
-
-
 ALTER TABLE "public"."ga4_daily_summary" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."ga4_page_rules" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."ga4_raw" ENABLE ROW LEVEL SECURITY;
@@ -5000,6 +5707,9 @@ ALTER TABLE "public"."gmb_locations" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."gsc_daily_summary" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."hoot_inventory" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."monthly_report_accounts" ENABLE ROW LEVEL SECURITY;
@@ -5201,6 +5911,20 @@ CREATE POLICY "service_full" ON "public"."ghl_leads_daily" TO "service_role" USI
 
 
 ALTER TABLE "public"."sync_log" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."tiktok_campaign_daily" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "tiktok_campaign_daily_select" ON "public"."tiktok_campaign_daily" FOR SELECT USING ("public"."can_access_customer"("customer_id"));
+
+
+
+ALTER TABLE "public"."tiktok_placement_daily" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "tiktok_placement_daily_select" ON "public"."tiktok_placement_daily" FOR SELECT USING ("public"."can_access_customer"("customer_id"));
+
 
 
 ALTER TABLE "public"."user_clients" ENABLE ROW LEVEL SECURITY;
@@ -5413,6 +6137,12 @@ GRANT USAGE ON SCHEMA "public" TO "service_role";
 
 
 
+GRANT ALL ON FUNCTION "public"."bing_metrics_sync_all"() TO "anon";
+GRANT ALL ON FUNCTION "public"."bing_metrics_sync_all"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."bing_metrics_sync_all"() TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."can_access_customer"("p_customer_id" "text") TO "anon";
 GRANT ALL ON FUNCTION "public"."can_access_customer"("p_customer_id" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."can_access_customer"("p_customer_id" "text") TO "service_role";
@@ -5422,6 +6152,18 @@ GRANT ALL ON FUNCTION "public"."can_access_customer"("p_customer_id" "text") TO 
 GRANT ALL ON FUNCTION "public"."classify_ghl_lead_type"("p_source" "text", "p_medium" "text") TO "anon";
 GRANT ALL ON FUNCTION "public"."classify_ghl_lead_type"("p_source" "text", "p_medium" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."classify_ghl_lead_type"("p_source" "text", "p_medium" "text") TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."cleanup_orphaned_all_ad_platforms"() TO "anon";
+GRANT ALL ON FUNCTION "public"."cleanup_orphaned_all_ad_platforms"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."cleanup_orphaned_all_ad_platforms"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."cleanup_orphaned_bing_data"() TO "anon";
+GRANT ALL ON FUNCTION "public"."cleanup_orphaned_bing_data"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."cleanup_orphaned_bing_data"() TO "service_role";
 
 
 
@@ -5443,15 +6185,21 @@ GRANT ALL ON FUNCTION "public"."cleanup_orphaned_reddit_data"() TO "service_role
 
 
 
+GRANT ALL ON FUNCTION "public"."cleanup_orphaned_tiktok_data"() TO "anon";
+GRANT ALL ON FUNCTION "public"."cleanup_orphaned_tiktok_data"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."cleanup_orphaned_tiktok_data"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."extract_url_path"("full_url" "text") TO "anon";
+GRANT ALL ON FUNCTION "public"."extract_url_path"("full_url" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."extract_url_path"("full_url" "text") TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."fb_metrics_sync_all"() TO "anon";
 GRANT ALL ON FUNCTION "public"."fb_metrics_sync_all"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."fb_metrics_sync_all"() TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."ga4_advanced_report"("p_customer_id" "text", "p_report_month" "text") TO "anon";
-GRANT ALL ON FUNCTION "public"."ga4_advanced_report"("p_customer_id" "text", "p_report_month" "text") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."ga4_advanced_report"("p_customer_id" "text", "p_report_month" "text") TO "service_role";
 
 
 
@@ -5545,6 +6293,12 @@ GRANT ALL ON FUNCTION "public"."handle_new_user"() TO "service_role";
 
 
 
+GRANT ALL ON FUNCTION "public"."hoot_inventory_sync_all"() TO "anon";
+GRANT ALL ON FUNCTION "public"."hoot_inventory_sync_all"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."hoot_inventory_sync_all"() TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."is_admin"() TO "anon";
 GRANT ALL ON FUNCTION "public"."is_admin"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."is_admin"() TO "service_role";
@@ -5572,6 +6326,18 @@ GRANT ALL ON FUNCTION "public"."reclassify_ga4_pages"("p_platform" "text", "p_da
 GRANT ALL ON FUNCTION "public"."reddit_metrics_sync_all"() TO "anon";
 GRANT ALL ON FUNCTION "public"."reddit_metrics_sync_all"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."reddit_metrics_sync_all"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."tt_metrics_sync_all"() TO "anon";
+GRANT ALL ON FUNCTION "public"."tt_metrics_sync_all"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."tt_metrics_sync_all"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."vdp_backfill_one_client"("p_client_id" "uuid") TO "anon";
+GRANT ALL ON FUNCTION "public"."vdp_backfill_one_client"("p_client_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."vdp_backfill_one_client"("p_client_id" "uuid") TO "service_role";
 
 
 
@@ -5620,6 +6386,90 @@ GRANT ALL ON TABLE "public"."agency_platform_credentials" TO "service_role";
 GRANT ALL ON TABLE "public"."agency_report_tabs" TO "anon";
 GRANT ALL ON TABLE "public"."agency_report_tabs" TO "authenticated";
 GRANT ALL ON TABLE "public"."agency_report_tabs" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."bing_ad_daily" TO "anon";
+GRANT ALL ON TABLE "public"."bing_ad_daily" TO "authenticated";
+GRANT ALL ON TABLE "public"."bing_ad_daily" TO "service_role";
+
+
+
+GRANT ALL ON SEQUENCE "public"."bing_ad_daily_id_seq" TO "anon";
+GRANT ALL ON SEQUENCE "public"."bing_ad_daily_id_seq" TO "authenticated";
+GRANT ALL ON SEQUENCE "public"."bing_ad_daily_id_seq" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."bing_campaign_daily" TO "anon";
+GRANT ALL ON TABLE "public"."bing_campaign_daily" TO "authenticated";
+GRANT ALL ON TABLE "public"."bing_campaign_daily" TO "service_role";
+
+
+
+GRANT ALL ON SEQUENCE "public"."bing_campaign_daily_id_seq" TO "anon";
+GRANT ALL ON SEQUENCE "public"."bing_campaign_daily_id_seq" TO "authenticated";
+GRANT ALL ON SEQUENCE "public"."bing_campaign_daily_id_seq" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."bing_customers" TO "anon";
+GRANT ALL ON TABLE "public"."bing_customers" TO "authenticated";
+GRANT ALL ON TABLE "public"."bing_customers" TO "service_role";
+
+
+
+GRANT ALL ON SEQUENCE "public"."bing_customers_id_seq" TO "anon";
+GRANT ALL ON SEQUENCE "public"."bing_customers_id_seq" TO "authenticated";
+GRANT ALL ON SEQUENCE "public"."bing_customers_id_seq" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."bing_geo_location_daily" TO "anon";
+GRANT ALL ON TABLE "public"."bing_geo_location_daily" TO "authenticated";
+GRANT ALL ON TABLE "public"."bing_geo_location_daily" TO "service_role";
+
+
+
+GRANT ALL ON SEQUENCE "public"."bing_geo_location_daily_id_seq" TO "anon";
+GRANT ALL ON SEQUENCE "public"."bing_geo_location_daily_id_seq" TO "authenticated";
+GRANT ALL ON SEQUENCE "public"."bing_geo_location_daily_id_seq" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."bing_keyword_daily" TO "anon";
+GRANT ALL ON TABLE "public"."bing_keyword_daily" TO "authenticated";
+GRANT ALL ON TABLE "public"."bing_keyword_daily" TO "service_role";
+
+
+
+GRANT ALL ON SEQUENCE "public"."bing_keyword_daily_id_seq" TO "anon";
+GRANT ALL ON SEQUENCE "public"."bing_keyword_daily_id_seq" TO "authenticated";
+GRANT ALL ON SEQUENCE "public"."bing_keyword_daily_id_seq" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."bing_search_term_daily" TO "anon";
+GRANT ALL ON TABLE "public"."bing_search_term_daily" TO "authenticated";
+GRANT ALL ON TABLE "public"."bing_search_term_daily" TO "service_role";
+
+
+
+GRANT ALL ON SEQUENCE "public"."bing_search_term_daily_id_seq" TO "anon";
+GRANT ALL ON SEQUENCE "public"."bing_search_term_daily_id_seq" TO "authenticated";
+GRANT ALL ON SEQUENCE "public"."bing_search_term_daily_id_seq" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."client_hoot_feeds" TO "anon";
+GRANT ALL ON TABLE "public"."client_hoot_feeds" TO "authenticated";
+GRANT ALL ON TABLE "public"."client_hoot_feeds" TO "service_role";
+
+
+
+GRANT ALL ON SEQUENCE "public"."client_hoot_feeds_id_seq" TO "anon";
+GRANT ALL ON SEQUENCE "public"."client_hoot_feeds_id_seq" TO "authenticated";
+GRANT ALL ON SEQUENCE "public"."client_hoot_feeds_id_seq" TO "service_role";
 
 
 
@@ -5695,18 +6545,6 @@ GRANT ALL ON SEQUENCE "public"."fb_placement_daily_id_seq" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."ga4_classified_pages" TO "anon";
-GRANT ALL ON TABLE "public"."ga4_classified_pages" TO "authenticated";
-GRANT ALL ON TABLE "public"."ga4_classified_pages" TO "service_role";
-
-
-
-GRANT ALL ON SEQUENCE "public"."ga4_classified_pages_id_seq" TO "anon";
-GRANT ALL ON SEQUENCE "public"."ga4_classified_pages_id_seq" TO "authenticated";
-GRANT ALL ON SEQUENCE "public"."ga4_classified_pages_id_seq" TO "service_role";
-
-
-
 GRANT ALL ON TABLE "public"."ga4_daily_summary" TO "anon";
 GRANT ALL ON TABLE "public"."ga4_daily_summary" TO "authenticated";
 GRANT ALL ON TABLE "public"."ga4_daily_summary" TO "service_role";
@@ -5740,18 +6578,6 @@ GRANT ALL ON TABLE "public"."ga4_monthly_reports" TO "service_role";
 GRANT ALL ON SEQUENCE "public"."ga4_monthly_reports_id_seq" TO "anon";
 GRANT ALL ON SEQUENCE "public"."ga4_monthly_reports_id_seq" TO "authenticated";
 GRANT ALL ON SEQUENCE "public"."ga4_monthly_reports_id_seq" TO "service_role";
-
-
-
-GRANT ALL ON TABLE "public"."ga4_page_rules" TO "anon";
-GRANT ALL ON TABLE "public"."ga4_page_rules" TO "authenticated";
-GRANT ALL ON TABLE "public"."ga4_page_rules" TO "service_role";
-
-
-
-GRANT ALL ON SEQUENCE "public"."ga4_page_rules_id_seq" TO "anon";
-GRANT ALL ON SEQUENCE "public"."ga4_page_rules_id_seq" TO "authenticated";
-GRANT ALL ON SEQUENCE "public"."ga4_page_rules_id_seq" TO "service_role";
 
 
 
@@ -5989,6 +6815,24 @@ GRANT ALL ON TABLE "public"."gsc_daily_summary" TO "service_role";
 
 
 
+GRANT ALL ON TABLE "public"."hoot_inventory" TO "anon";
+GRANT ALL ON TABLE "public"."hoot_inventory" TO "authenticated";
+GRANT ALL ON TABLE "public"."hoot_inventory" TO "service_role";
+
+
+
+GRANT ALL ON SEQUENCE "public"."hoot_inventory_id_seq" TO "anon";
+GRANT ALL ON SEQUENCE "public"."hoot_inventory_id_seq" TO "authenticated";
+GRANT ALL ON SEQUENCE "public"."hoot_inventory_id_seq" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."merged_migration_data" TO "anon";
+GRANT ALL ON TABLE "public"."merged_migration_data" TO "authenticated";
+GRANT ALL ON TABLE "public"."merged_migration_data" TO "service_role";
+
+
+
 GRANT ALL ON TABLE "public"."monthly_report_accounts" TO "anon";
 GRANT ALL ON TABLE "public"."monthly_report_accounts" TO "authenticated";
 GRANT ALL ON TABLE "public"."monthly_report_accounts" TO "service_role";
@@ -6076,6 +6920,30 @@ GRANT ALL ON TABLE "public"."sync_log" TO "service_role";
 GRANT ALL ON SEQUENCE "public"."sync_log_id_seq" TO "anon";
 GRANT ALL ON SEQUENCE "public"."sync_log_id_seq" TO "authenticated";
 GRANT ALL ON SEQUENCE "public"."sync_log_id_seq" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."tiktok_campaign_daily" TO "anon";
+GRANT ALL ON TABLE "public"."tiktok_campaign_daily" TO "authenticated";
+GRANT ALL ON TABLE "public"."tiktok_campaign_daily" TO "service_role";
+
+
+
+GRANT ALL ON SEQUENCE "public"."tiktok_campaign_daily_id_seq" TO "anon";
+GRANT ALL ON SEQUENCE "public"."tiktok_campaign_daily_id_seq" TO "authenticated";
+GRANT ALL ON SEQUENCE "public"."tiktok_campaign_daily_id_seq" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."tiktok_placement_daily" TO "anon";
+GRANT ALL ON TABLE "public"."tiktok_placement_daily" TO "authenticated";
+GRANT ALL ON TABLE "public"."tiktok_placement_daily" TO "service_role";
+
+
+
+GRANT ALL ON SEQUENCE "public"."tiktok_placement_daily_id_seq" TO "anon";
+GRANT ALL ON SEQUENCE "public"."tiktok_placement_daily_id_seq" TO "authenticated";
+GRANT ALL ON SEQUENCE "public"."tiktok_placement_daily_id_seq" TO "service_role";
 
 
 

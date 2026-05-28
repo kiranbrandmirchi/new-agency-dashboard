@@ -105,7 +105,7 @@ Deno.serve(async (req)=>{
         fb_exchange_token: storedToken
       });
       const tokenRes = await fetch(FB_BASE + "/oauth/access_token?" + tokenParams.toString());
-      const tokenData = await tokenRes.json().catch(() => ({}));
+      const tokenData = await tokenRes.json().catch(()=>({}));
       const tokenErrMsg = tokenData.error ? typeof tokenData.error === "string" ? tokenData.error : tokenData.error.message || JSON.stringify(tokenData.error) : !tokenRes.ok ? "HTTP " + tokenRes.status : !tokenData.access_token ? "No access_token in exchange response" : null;
       if (tokenErrMsg || !tokenData.access_token) {
         const detail = (tokenErrMsg || "Token exchange failed") + (tokenData && Object.keys(tokenData).length ? " | " + JSON.stringify(tokenData).substring(0, 350) : "");
