@@ -1,6 +1,8 @@
 import PptxGenJS from 'pptxgenjs';
 import { buildReportFileName } from './reportFileName';
-import { loadImageDataUrl } from './loadImageDataUrl';
+import { loadLogoForDarkBackground } from './loadImageDataUrl';
+import { addSeoSlidesToPptx } from './monthlySeoPptxBuilder';
+import { formatDisplayPeriodLabel } from './monthlyReportHelpers';
 import {
   COVER_LEFT_W_IN,
   COVER_RIGHT_W_IN,
@@ -52,10 +54,13 @@ export type MonthlyExportData = {
   searchOverview: { table: Array<{ metric: string; overall: string; paid: string; organic: string; paidPct: string; organicPct: string }> };
   topKeywords: { table: Array<{ keyword: string; cost: string; conversions: string }>; insight: string };
   auctionInsights: {
-    table: Array<{ domain: string; impressionShare: string; overlapRate: string; posAbove: string; topPage: string; absTop: string; outranking: string }>;
+    table?: Array<{ domain: string; impressionShare: string; overlapRate: string; posAbove: string; topPage: string; absTop: string; outranking: string }>;
+    current?: { periodLabel: string; table: Array<{ domain: string; impressionShare: string; overlapRate: string; posAbove: string; topPage: string; absTop: string; outranking: string }> };
+    previous?: { periodLabel: string; table: Array<{ domain: string; impressionShare: string; overlapRate: string; posAbove: string; topPage: string; absTop: string; outranking: string }> };
     insights: string[];
   };
   campaignProgress: { overview: string; performance: string; metrics: string; goal: string };
+  seo?: Record<string, unknown>;
 };
 
 const COVER_LOGO_X = SLIDE_W_IN - 1.55;
@@ -171,15 +176,11 @@ function redHeader(slide: PptxSlide, title: string, right?: string) {
 
 function redFooter(slide: PptxSlide, month: string) {
   slide.addShape('rect', { x: 0, y: FOOTER_Y, w: 10, h: FOOTER_H, fill: { color: C.redBar } });
-  slide.addText(`Red Castle Services | SEO & Digital Marketing Report | ${month}`, {
-    x: 0.2,
-    y: FOOTER_Y + 0.05,
-    w: 9.6,
-    h: 0.2,
-    fontSize: 8,
-    color: C.white,
-    italic: true,
-  });
+  slide.addText([
+    { text: 'RED CASTLE SERVICES', options: { bold: true, fontSize: 9 } },
+    { text: ' | SEO & DIGITAL MARKETING REPORT | ', options: { fontSize: 8 } },
+    { text: month, options: { fontSize: 8 } },
+  ], { x: 0.2, y: FOOTER_Y + 0.05, w: 9.6, h: 0.2, color: C.white, valign: 'middle' });
 }
 
 function redSubBar(slide: PptxSlide, text: string, y: number) {
@@ -272,29 +273,32 @@ function addCoverSlide(pptx: PptxGenJS, data: MonthlyExportData, logoDataUrl: st
     fill: { color: C.coverRed },
   });
 
-  // Left column — top metadata, "Monthly Report" anchored to bottom
-  slide.addText('SERVICES', {
+  // Left column — brand block vertically centered
+  const leftBrandY = SLIDE_H * 0.38;
+  slide.addText('RED CASTLE SERVICES', {
     x: leftPad,
-    y: 0.38,
+    y: leftBrandY,
     w: COVER_LEFT_W_IN - leftPad * 2,
-    h: 0.22,
-    fontSize: 9,
+    h: 0.45,
+    fontSize: 14,
     color: C.white,
     bold: true,
+    charSpacing: 2,
   });
   slide.addShape('rect', {
     x: leftPad,
-    y: 0.62,
-    w: 1.45,
+    y: leftBrandY + 0.52,
+    w: 1.65,
     h: 0.03,
     fill: { color: C.white },
   });
   slide.addText(data.month, {
     x: leftPad,
-    y: 0.72,
+    y: leftBrandY + 0.62,
     w: COVER_LEFT_W_IN - leftPad * 2,
     h: 0.28,
-    fontSize: 11,
+    fontSize: 12,
+    bold: true,
     color: C.white,
   });
   slide.addText('Monthly\nReport', {
@@ -309,42 +313,31 @@ function addCoverSlide(pptx: PptxGenJS, data: MonthlyExportData, logoDataUrl: st
     valign: 'top',
   });
 
-  // Right column — logo top-right, title, client, footer
-  slide.addShape('rect', {
-    x: COVER_LOGO_X,
-    y: COVER_LOGO_Y,
-    w: COVER_LOGO_SIZE,
-    h: COVER_LOGO_SIZE,
-    fill: { color: C.white },
-  });
+  // Right column — logo vertically centered, title caps
+  const logoW = 1.15;
+  const logoH = 1.15;
+  const logoX = SLIDE_W_IN - logoW - 0.45;
+  const logoY = (SLIDE_H - logoH) / 2;
   if (logoDataUrl) {
     slide.addImage({
       data: logoDataUrl,
-      x: COVER_LOGO_X,
-      y: COVER_LOGO_Y,
-      w: COVER_LOGO_SIZE,
-      h: COVER_LOGO_SIZE,
+      x: logoX,
+      y: logoY,
+      w: logoW,
+      h: logoH,
+      sizing: { type: 'contain', w: logoW, h: logoH },
     });
   }
-  slide.addText('RED CASTLE\nSERVICES', {
-    x: SLIDE_W_IN - 1.1,
-    y: COVER_LOGO_Y,
-    w: 1.05,
-    h: 0.48,
-    fontSize: 7,
-    bold: true,
-    color: C.white,
-    lineSpacing: 10,
-  });
-  slide.addText('SEO & Digital\nMarketing\nUpdates', {
+  slide.addText('SEO & DIGITAL\nMARKETING\nUPDATES', {
     x: rightPad,
-    y: 0.72,
-    w: COVER_RIGHT_W_IN - 0.35,
-    h: 1.75,
-    fontSize: 32,
+    y: 0.85,
+    w: COVER_RIGHT_W_IN - 1.2,
+    h: 1.85,
+    fontSize: 30,
     bold: true,
     color: C.white,
-    lineSpacing: 22,
+    lineSpacing: 24,
+    charSpacing: 1.5,
     valign: 'top',
   });
   slide.addText(data.client, {
@@ -368,8 +361,8 @@ function addCoverSlide(pptx: PptxGenJS, data: MonthlyExportData, logoDataUrl: st
     y: SLIDE_H - 0.48,
     w: COVER_RIGHT_W_IN - 0.3,
     h: 0.28,
-    fontSize: 9,
-    color: '999999',
+    fontSize: 10,
+    color: 'AAAAAA',
   });
 }
 
@@ -559,19 +552,22 @@ function addPaidAdsOverallSlide(pptx: PptxGenJS, data: MonthlyExportData) {
     color: C.navy,
   });
   const { currentMonthLabel, previousMonthLabel } = data.paidAdsOverall;
+  const curPill = data.currentShortLabel || currentMonthLabel;
+  const prevPill = data.previousShortLabel || previousMonthLabel;
   if (compareOn) {
     const pillY = panelY + 0.08;
-    slide.addShape('rect', { x: 7.0, y: pillY, w: 1.05, h: 0.28, fill: { color: C.tabBlue } });
-    slide.addText(currentMonthLabel, { x: 7.0, y: pillY + 0.04, w: 1.05, h: 0.22, fontSize: 7, color: C.white, align: 'center' });
-    slide.addShape('rect', { x: 8.1, y: pillY, w: 1.05, h: 0.28, fill: { color: C.white }, line: { color: 'D1D5DB', width: 0.5 } });
-    slide.addText(previousMonthLabel, { x: 8.1, y: pillY + 0.04, w: 1.05, h: 0.22, fontSize: 7, color: C.slate, align: 'center' });
+    const pillW = 1.25;
+    slide.addShape('rect', { x: 6.85, y: pillY, w: pillW, h: 0.28, fill: { color: C.tabBlue } });
+    slide.addText(curPill, { x: 6.85, y: pillY + 0.04, w: pillW, h: 0.22, fontSize: 7, color: C.white, align: 'center' });
+    slide.addShape('rect', { x: 8.15, y: pillY, w: pillW, h: 0.28, fill: { color: C.white }, line: { color: 'D1D5DB', width: 0.5 } });
+    slide.addText(prevPill, { x: 8.15, y: pillY + 0.04, w: pillW, h: 0.22, fontSize: 7, color: C.slate, align: 'center' });
   }
   const tableData = Array.isArray(data.paidAdsOverall.table) ? data.paidAdsOverall.table : [];
   const headerRow = compareOn
     ? [
         { text: 'Metric', options: th },
-        { text: currentMonthLabel, options: th },
-        { text: previousMonthLabel, options: th },
+        { text: curPill, options: th },
+        { text: prevPill, options: th },
         { text: 'Change', options: th },
       ]
     : [
@@ -788,13 +784,28 @@ function addTopKeywordsSlide(pptx: PptxGenJS, data: MonthlyExportData) {
   redFooter(slide, data.month);
 }
 
-/** Slide 9 — Auction Insights */
+/** Slide 9 — Auction Insights (current month above, previous below) */
 function addAuctionInsightsSlide(pptx: PptxGenJS, data: MonthlyExportData) {
   const slide = pptx.addSlide();
   redHeader(slide, `Google Ads Auction Insights  |  ${data.month}`);
   contentBackground(slide);
-  const headerOpts = { ...th, fontSize: 8 };
-  const tableRows = [
+  const headerOpts = { ...th, fontSize: 7 };
+  const colW = [1.45, 1.15, 1.05, 1.3, 1.15, 1.3, 1.15] as const;
+  const AUCTION_DOMAIN_MAX = 28;
+  const PERIOD_LABEL_H = 0.2;
+  const PERIOD_LABEL_GAP = 0.22;
+  const PERIOD_DIVIDER_GAP = 0.22;
+  const TABLE_BUFFER = 0.18;
+
+  const truncateDomain = (d: string) => {
+    const t = String(d || '').trim();
+    if (t.toLowerCase() === 'you') return t;
+    return t.length > AUCTION_DOMAIN_MAX ? `${t.slice(0, AUCTION_DOMAIN_MAX - 1)}…` : t;
+  };
+
+  type AuctionRow = { domain: string; impressionShare: string; overlapRate: string; posAbove: string; topPage: string; absTop: string; outranking: string };
+
+  const buildTableRows = (rows: AuctionRow[]) => [
     [
       { text: 'Domain', options: headerOpts },
       { text: 'Impression Share', options: headerOpts },
@@ -804,14 +815,15 @@ function addAuctionInsightsSlide(pptx: PptxGenJS, data: MonthlyExportData) {
       { text: 'Abs. Top of Page Rate', options: headerOpts },
       { text: 'Outranking Share', options: headerOpts },
     ],
-    ...(Array.isArray(data.auctionInsights.table) ? data.auctionInsights.table : []).map((row, i) => {
-      const fill = i === 0 ? C.greenLight : C.white;
+    ...rows.map((row) => {
+      const isYou = String(row.domain || '').trim().toLowerCase() === 'you';
+      const fill = isYou ? C.greenLight : C.white;
       const cell = (t: string, bold = false) => ({
         text: t,
-        options: { fontSize: 8, color: C.darkGray, fill, align: 'center' as const, bold },
+        options: { fontSize: 7, color: C.darkGray, fill, align: 'center' as const, bold: bold || isYou },
       });
       return [
-        cell(row.domain, i === 0),
+        cell(truncateDomain(row.domain), isYou),
         cell(row.impressionShare),
         cell(row.overlapRate),
         cell(row.posAbove),
@@ -821,17 +833,67 @@ function addAuctionInsightsSlide(pptx: PptxGenJS, data: MonthlyExportData) {
       ];
     }),
   ];
-  const auctionRows = Array.isArray(data.auctionInsights.table) ? data.auctionInsights.table : [];
-  const auctionRowH = 0.26;
-  addDataTable(slide, tableRows, {
-    x: 0.2,
-    y: MAIN_Y + 0.1,
-    w: 9.6,
-    colW: [1.45, 1.15, 1.05, 1.3, 1.15, 1.3, 1.15],
-    rowH: auctionRowH,
-    border,
-  });
-  const insights = Array.isArray(data.auctionInsights.insights) ? data.auctionInsights.insights : [];
+
+  const ai = data.auctionInsights || { insights: [] };
+  const currentRows = Array.isArray(ai.current?.table) && ai.current.table.length
+    ? ai.current.table
+    : (Array.isArray(ai.table) ? ai.table : []);
+  const previousRows = Array.isArray(ai.previous?.table) ? ai.previous.table : [];
+  const currentLabel = formatDisplayPeriodLabel(ai.current?.periodLabel, data.currentShortLabel || data.month);
+  const previousLabel = formatDisplayPeriodLabel(ai.previous?.periodLabel, data.previousShortLabel || 'Previous month');
+
+  const notesH = 0.82;
+  let y = MAIN_Y + 0.04;
+  const bottomLimit = FOOTER_Y - notesH;
+  const periodCount = (currentRows.length ? 1 : 0) + (previousRows.length ? 1 : 0);
+  const dividerCount = currentRows.length && previousRows.length ? 1 : 0;
+  const labelOverhead = periodCount * (PERIOD_LABEL_H + PERIOD_LABEL_GAP);
+  const dividerOverhead = dividerCount * PERIOD_DIVIDER_GAP;
+  const bufferOverhead = periodCount * TABLE_BUFFER;
+  const totalTableRows = (currentRows.length + 1) + (previousRows.length ? previousRows.length + 1 : 0);
+  const availH = bottomLimit - y - labelOverhead - dividerOverhead - bufferOverhead;
+  const rowH = totalTableRows > 0
+    ? Math.max(0.125, Math.min(0.175, availH / totalTableRows))
+    : 0.17;
+
+  const addPeriodBlock = (label: string, rows: AuctionRow[], isCompare: boolean) => {
+    if (!rows.length) return;
+    if (isCompare) {
+      slide.addShape('line', {
+        x: 0.28,
+        y: y + 0.02,
+        w: 9.44,
+        h: 0,
+        line: { color: 'CBD5E1', width: 1 },
+      });
+      y += PERIOD_DIVIDER_GAP;
+    }
+    slide.addText(label, {
+      x: 0.22,
+      y,
+      w: 9.2,
+      h: PERIOD_LABEL_H,
+      fontSize: 9,
+      bold: true,
+      color: isCompare ? C.midGray : C.redBar,
+    });
+    y += PERIOD_LABEL_H + PERIOD_LABEL_GAP;
+    addDataTable(slide, buildTableRows(rows), {
+      x: 0.2,
+      y,
+      w: 9.6,
+      colW: [...colW],
+      rowH,
+      border,
+    });
+    const wrapBonus = rows.filter((r) => String(r.domain || '').length > AUCTION_DOMAIN_MAX).length * rowH * 0.2;
+    y += rowH * (rows.length + 1) + wrapBonus + TABLE_BUFFER;
+  };
+
+  addPeriodBlock(currentLabel, currentRows, false);
+  addPeriodBlock(previousLabel, previousRows, true);
+
+  const insights = Array.isArray(ai.insights) ? ai.insights : [];
   addBottomNotesBox(
     slide,
     'Auction Insight',
@@ -904,14 +966,15 @@ export type GenerateMonthlyPptxOptions = {
 export async function buildEditableMonthlyPptx(
   data: MonthlyExportData,
   options: GenerateMonthlyPptxOptions,
-): Promise<void> {
+  output: 'download' | 'blob' = 'download',
+): Promise<Blob | void> {
   const PptxCtor = (PptxGenJS as unknown as { default?: typeof PptxGenJS }).default ?? PptxGenJS;
   const pptx = new PptxCtor();
   pptx.layout = 'LAYOUT_16x9';
   pptx.author = 'Red Castle Services';
   pptx.title = `${options.clientName} — ${options.monthLabel}`;
 
-  const logoDataUrl = await loadImageDataUrl(data.coverLogoUrl ?? '/rc-logo.png');
+  const logoDataUrl = await loadLogoForDarkBackground(data.coverLogoUrl ?? '/rc-logo-rcs.jpg');
 
   addCoverSlide(pptx, data, logoDataUrl);
   addContentSlide2(pptx, data);
@@ -923,6 +986,12 @@ export async function buildEditableMonthlyPptx(
   addTopKeywordsSlide(pptx, data);
   addAuctionInsightsSlide(pptx, data);
   addCampaignProgressSlide(pptx, data);
+  addSeoSlidesToPptx(pptx, data as unknown as Record<string, unknown>);
+
+  if (output === 'blob') {
+    const result = await pptx.write({ outputType: 'blob' });
+    return result as Blob;
+  }
 
   await pptx.writeFile({
     fileName: buildReportFileName(options.clientName, options.monthLabel, 'pptx'),

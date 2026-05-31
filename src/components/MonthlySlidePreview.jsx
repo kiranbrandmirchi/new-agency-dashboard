@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef } from 'react';
 import { CsvUploader } from './CsvUploader';
+import { useLogoForDarkBackground } from '../utils/loadImageDataUrl';
 import {
   parseSectionJson,
   getSectionText,
@@ -12,8 +13,12 @@ import {
   fI,
 } from '../utils/monthlyReportHelpers';
 import '../styles/monthlySlidePreview.css';
+import { SEO_SLIDE_DEFINITIONS, renderSeoSlide } from './MonthlySeoSlides';
+import { parseGoogleSheetsUrl } from '../utils/googleSheetsEmbed';
+import { normalizeAuctionSlideData } from '../utils/auctionInsightsSheet';
+import { formatDisplayPeriodLabel } from '../utils/monthlyReportHelpers';
 
-const SLIDE_DEFINITIONS = [
+const BASE_SLIDE_DEFINITIONS = [
   { num: 1, title: 'Cover' },
   { num: 2, title: 'What We Are Managing' },
   { num: 3, title: 'Lead Summary' },
@@ -25,6 +30,9 @@ const SLIDE_DEFINITIONS = [
   { num: 9, title: 'Auction Insights' },
   { num: 10, title: 'Campaign Progress & Next Steps' },
 ];
+
+const SLIDE_DEFINITIONS = [...BASE_SLIDE_DEFINITIONS, ...SEO_SLIDE_DEFINITIONS];
+const SLIDE_COUNT = SLIDE_DEFINITIONS.length;
 
 function EditableText({ value, onChange, className, multiline, disabled, as = 'div' }) {
   const ref = useRef(null);
@@ -80,7 +88,11 @@ function EditableText({ value, onChange, className, multiline, disabled, as = 'd
 function Footer({ monthLabel }) {
   return (
     <div className="mr-slide-red-bar mr-slide-red-bar--footer">
-      Red Castle Services | SEO &amp; Digital Marketing Report | {monthLabel}
+      <span className="mr-slide-footer-brand">RED CASTLE SERVICES</span>
+      <span className="mr-slide-footer-sep">|</span>
+      <span className="mr-slide-footer-title">SEO &amp; DIGITAL MARKETING REPORT</span>
+      <span className="mr-slide-footer-sep">|</span>
+      <span>{monthLabel}</span>
     </div>
   );
 }
@@ -110,22 +122,22 @@ function NotesBox({ title = 'Notes', children }) {
 function Slide1({ clientName, monthLabel, agency, coverLogoUrl }) {
   const preparedBy = agency?.agency_name || 'Red Castle Services';
   const website = (agency?.website_url || 'redcastleservices.com').replace(/^https?:\/\//, '');
+  const logoSrc = useLogoForDarkBackground(coverLogoUrl || '/rc-logo-rcs.jpg');
   return (
     <div className="mr-slide-inner mr-slide-cover">
       <div className="mr-slide-cover-left">
-        <div className="mr-slide-cover-services">SERVICES</div>
-        <div className="mr-slide-cover-rule" />
-        <div className="mr-slide-cover-month">{monthLabel}</div>
+        <div className="mr-slide-cover-left-inner">
+          <div className="mr-slide-cover-brand">RED CASTLE SERVICES</div>
+          <div className="mr-slide-cover-rule" />
+          <div className="mr-slide-cover-month">{monthLabel}</div>
+        </div>
         <div className="mr-slide-cover-monthly">Monthly<br />Report</div>
       </div>
       <div className="mr-slide-cover-right">
         <div className="mr-slide-cover-logo">
-          <div className="mr-slide-cover-logo-icon">
-            <img src={coverLogoUrl || '/rc-logo.png'} alt="" />
-          </div>
-          <div className="mr-slide-cover-logo-text">RED CASTLE<span>SERVICES</span></div>
+          <img src={logoSrc} alt="Red Castle Services" className="mr-slide-cover-logo-img" />
         </div>
-        <h2 className="mr-slide-cover-title">SEO &amp; Digital<br />Marketing<br />Updates</h2>
+        <h2 className="mr-slide-cover-title">SEO &amp; DIGITAL<br />MARKETING<br />UPDATES</h2>
         <p className="mr-slide-cover-client">{clientName}</p>
         <div className="mr-slide-cover-divider" />
         <p className="mr-slide-cover-prepared">Prepared by {preparedBy} | {website}</p>
@@ -460,66 +472,148 @@ function Slide8({ data, insights, editable, onChangeInsights, clientName, monthL
   );
 }
 
-function Slide9({ auctionRows, notes, editable, onChangeRows, onChangeNotes, monthLabel }) {
-  const rows = auctionRows?.length ? auctionRows : [{ domain: '', impressionShare: '', overlapRate: '', posAbove: '', topPage: '', absTop: '', outranking: '' }];
+const EMPTY_AUCTION_ROW = Object.fromEntries(AUCTION_COLUMNS.map((c) => [c, '']));
 
+function AuctionTable({ rows, editable, onChangeRows, compact }) {
+  const displayRows = rows?.length ? rows : [EMPTY_AUCTION_ROW];
   const updateCell = (ri, col, val) => {
-    onChangeRows?.(rows.map((r, i) => (i === ri ? { ...r, [col]: val } : r)));
+    onChangeRows?.(displayRows.map((r, i) => (i === ri ? { ...r, [col]: val } : r)));
+  };
+
+  return (
+    <div className={`mr-slide-table-wrap mr-slide-table-wrap--auction${compact ? ' mr-slide-table-wrap--auction-compact' : ''}`}>
+      <table className={`mr-slide-table mr-slide-table--auction${compact ? ' mr-slide-table--auction-compact' : ''}`}>
+        <thead>
+          <tr>
+            <th>Domain</th>
+            <th>Impression Share</th>
+            <th>Overlap Rate</th>
+            <th>Position Above Rate</th>
+            <th>Top of Page Rate</th>
+            <th>Abs. Top of Page Rate</th>
+            <th>Outranking Share</th>
+            {editable && <th />}
+          </tr>
+        </thead>
+        <tbody>
+          {displayRows.map((row, ri) => (
+            <tr key={`${row.domain}-${ri}`} className={String(row.domain || '').toLowerCase() === 'you' ? 'mr-slide-auction-you-row' : ''}>
+              {AUCTION_COLUMNS.map((col) => (
+                editable ? (
+                  <td key={col}>
+                    <input className="mr-slide-cell-input" value={row[col] ?? ''} onChange={(e) => updateCell(ri, col, e.target.value)} />
+                  </td>
+                ) : (
+                  <td key={col} className={String(row.domain || '').toLowerCase() === 'you' && col === 'domain' ? 'mr-slide-auction-you-cell' : ''}>{row[col]}</td>
+                )
+              ))}
+              {editable && (
+                <td>
+                  <button type="button" className="btn btn-outline btn-sm" style={{ fontSize: 9, padding: '1px 4px' }} onClick={() => onChangeRows?.(displayRows.filter((_, i) => i !== ri))}>×</button>
+                </td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function Slide9({
+  auctionData,
+  notes,
+  editable,
+  onChangeAuctionData,
+  onChangeNotes,
+  monthLabel,
+  previousLabel,
+  auctionSheetUrl,
+  auctionSheetPreviousUrl,
+  auctionSheetLoading,
+  onAuctionSheetUrl,
+  onAuctionSheetPreviousUrl,
+  onReloadAuctionSheet,
+}) {
+  const data = normalizeAuctionSlideData(auctionData);
+  const currentLabel = formatDisplayPeriodLabel(data.current.periodLabel, monthLabel);
+  const prevLabel = formatDisplayPeriodLabel(data.previous.periodLabel, previousLabel || 'Previous month');
+  const parsedCurrent = auctionSheetUrl ? parseGoogleSheetsUrl(auctionSheetUrl) : null;
+  const parsedPrevious = auctionSheetPreviousUrl ? parseGoogleSheetsUrl(auctionSheetPreviousUrl) : null;
+
+  const updatePeriodRows = (period, nextRows) => {
+    onChangeAuctionData?.({ ...data, [period]: { ...data[period], rows: nextRows } });
   };
 
   return (
     <div className="mr-slide-inner">
       <Header title={`Google Ads Auction Insights  |  ${monthLabel}`} />
-      <div className="mr-slide-main" style={{ display: 'flex', flexDirection: 'column' }}>
+      <div className="mr-slide-main mr-slide-main--auction mr-slide-main--auction-dual">
         {editable && (
           <div className="mr-slide-auction-toolbar">
+            <label className="mr-slide-auction-sheet-field">
+              <span>Current month sheet (e.g. April)</span>
+              <input
+                type="url"
+                className="form-control"
+                placeholder="https://docs.google.com/spreadsheets/d/..."
+                value={auctionSheetUrl || ''}
+                onChange={(e) => onAuctionSheetUrl?.(e.target.value.trim())}
+              />
+            </label>
+            <label className="mr-slide-auction-sheet-field">
+              <span>Previous month sheet (e.g. March)</span>
+              <input
+                type="url"
+                className="form-control"
+                placeholder="https://docs.google.com/spreadsheets/d/..."
+                value={auctionSheetPreviousUrl || ''}
+                onChange={(e) => onAuctionSheetPreviousUrl?.(e.target.value.trim())}
+              />
+            </label>
+            <button
+              type="button"
+              className="btn btn-outline btn-sm"
+              disabled={auctionSheetLoading}
+              onClick={() => onReloadAuctionSheet?.()}
+            >
+              {auctionSheetLoading ? 'Loading…' : 'Reload from sheets'}
+            </button>
+            {parsedCurrent?.viewUrl ? (
+              <a className="mr-slide-auction-sheet-link" href={parsedCurrent.viewUrl} target="_blank" rel="noreferrer">Open current</a>
+            ) : null}
+            {parsedPrevious?.viewUrl ? (
+              <a className="mr-slide-auction-sheet-link" href={parsedPrevious.viewUrl} target="_blank" rel="noreferrer">Open previous</a>
+            ) : null}
             <CsvUploader
               label=""
               value={[]}
-              onChange={(csv) => onChangeRows?.(csvToAuctionRows(csv))}
+              onChange={(csv) => updatePeriodRows('current', csvToAuctionRows(csv))}
               templateHeaders={AUCTION_CSV_HEADERS}
               templateFilename="auction_insights_template.csv"
             />
-            <button type="button" className="btn btn-outline btn-sm" onClick={() => onChangeRows?.([...rows, Object.fromEntries(AUCTION_COLUMNS.map((c) => [c, '']))])}>+ Row</button>
+            <button type="button" className="btn btn-outline btn-sm" onClick={() => updatePeriodRows('current', [...data.current.rows, { ...EMPTY_AUCTION_ROW }])}>+ Row</button>
           </div>
         )}
-        <div className="mr-slide-table-wrap">
-          <table className="mr-slide-table" style={{ fontSize: '7px' }}>
-            <thead>
-              <tr>
-                <th>Domain</th>
-                <th>Impression Share</th>
-                <th>Overlap Rate</th>
-                <th>Position Above Rate</th>
-                <th>Top of Page Rate</th>
-                <th>Abs. Top of Page Rate</th>
-                <th>Outranking Share</th>
-                {editable && <th />}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row, ri) => (
-                <tr key={ri} className={ri === 0 ? 'alt' : ''}>
-                  {AUCTION_COLUMNS.map((col) => (
-                    editable ? (
-                      <td key={col}>
-                        <input className="mr-slide-cell-input" value={row[col] ?? ''} onChange={(e) => updateCell(ri, col, e.target.value)} />
-                      </td>
-                    ) : (
-                      <td key={col} style={{ fontWeight: ri === 0 && col === 'domain' ? 700 : 400 }}>{row[col]}</td>
-                    )
-                  ))}
-                  {editable && (
-                    <td>
-                      <button type="button" className="btn btn-outline btn-sm" style={{ fontSize: 9, padding: '1px 4px' }} onClick={() => onChangeRows?.(rows.filter((_, i) => i !== ri))}>×</button>
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="mr-slide-auction-period mr-slide-auction-period--current">
+          <div className="mr-seo-period-tag">{currentLabel}</div>
+          <AuctionTable
+            rows={data.current.rows}
+            editable={editable}
+            onChangeRows={(rows) => updatePeriodRows('current', rows)}
+            compact
+          />
         </div>
-        <div className="mr-slide-insight-box">
+        <div className="mr-slide-auction-period mr-slide-auction-period--compare">
+          <div className="mr-seo-period-tag">{prevLabel}</div>
+          <AuctionTable
+            rows={data.previous.rows}
+            editable={editable}
+            onChangeRows={(rows) => updatePeriodRows('previous', rows)}
+            compact
+          />
+        </div>
+        <div className="mr-slide-insight-box mr-slide-insight-box--auction">
           <div className="mr-slide-insight-title">Auction Insight</div>
           {editable ? (
             <EditableText as="textarea" className="mr-slide-insight-textarea" value={notes} onChange={onChangeNotes} multiline />
@@ -570,18 +664,32 @@ function Slide10({ progress, editable, onChangeProgress, monthLabel }) {
 }
 
 function renderSlide(num, props) {
-  const { clientName, monthLabel, agency, slideData, sections, editable, handlers } = props;
+  const { clientName, monthLabel, agency, slideData, sections, editable, handlers, seoHandlers, exportMode } = props;
   const compareOn = slideData?.compareOn !== false;
   const common = { monthLabel };
   const services = handlers.slide2 ?? parseSectionJson(sections, 'slide2_services', DEFAULT_SLIDE2_SERVICES);
   const leadData = handlers.slide3 ?? parseSectionJson(sections, 'slide3_leads', slideData?.slide3Prefill || { rows: [], statBoxes: [] });
   const insights = handlers.slide8 ?? getSectionText(sections, 'slide8_insights', '');
-  const auctionRows = handlers.slide9data ?? parseSectionJson(sections, 'slide9_auction_data', []);
+  const auctionData = handlers.slide9data ?? parseSectionJson(sections, 'slide9_auction_data', []);
   const auctionNotes = handlers.slide9notes ?? getSectionText(sections, 'slide9_auction_notes', '');
   const progress = handlers.slide10 ?? parseSectionJson(sections, 'slide10_progress', DEFAULT_SLIDE10_PROGRESS);
 
+  if (num >= 11) {
+    return renderSeoSlide(num, {
+      clientName,
+      monthLabel,
+      agency,
+      slideData,
+      seoHandlers,
+      editable,
+      compareOn,
+      compareSections: slideData?.compareSections,
+      exportMode,
+    });
+  }
+
   switch (num) {
-    case 1: return <Slide1 clientName={clientName} monthLabel={monthLabel} agency={agency} coverLogoUrl={agency?.logo_url} />;
+    case 1: return <Slide1 clientName={clientName} monthLabel={monthLabel} agency={agency} coverLogoUrl={agency?.logo_url || '/rc-logo-rcs.jpg'} />;
     case 2: return <Slide2 services={services} editable={editable} onChangeService={handlers.onSlide2} clientName={clientName} {...common} />;
     case 3: return (
       <Slide3
@@ -600,7 +708,23 @@ function renderSlide(num, props) {
     case 6: return <Slide6 data={slideData} compareOn={compareOn} clientName={clientName} monthLabel={monthLabel} />;
     case 7: return <Slide7 data={slideData} clientName={clientName} monthLabel={monthLabel} />;
     case 8: return <Slide8 data={slideData} insights={insights} editable={editable} onChangeInsights={handlers.onSlide8} clientName={clientName} monthLabel={monthLabel} />;
-    case 9: return <Slide9 auctionRows={auctionRows} notes={auctionNotes} editable={editable} onChangeRows={handlers.onSlide9data} onChangeNotes={handlers.onSlide9notes} monthLabel={monthLabel} />;
+    case 9: return (
+      <Slide9
+        auctionData={auctionData}
+        notes={auctionNotes}
+        editable={editable}
+        onChangeAuctionData={handlers.onSlide9data}
+        onChangeNotes={handlers.onSlide9notes}
+        auctionSheetUrl={handlers.auctionSheetUrl}
+        auctionSheetPreviousUrl={handlers.auctionSheetPreviousUrl}
+        auctionSheetLoading={handlers.auctionSheetLoading}
+        onAuctionSheetUrl={handlers.onAuctionSheetUrl}
+        onAuctionSheetPreviousUrl={handlers.onAuctionSheetPreviousUrl}
+        onReloadAuctionSheet={handlers.onReloadAuctionSheet}
+        monthLabel={monthLabel}
+        previousLabel={slideData?.previousLabel || ''}
+      />
+    );
     case 10: return <Slide10 progress={progress} editable={editable} onChangeProgress={handlers.onSlide10} monthLabel={monthLabel} />;
     default: return null;
   }
@@ -617,6 +741,7 @@ export function MonthlySlidePreview({
   sections,
   editable = false,
   handlers = {},
+  seoHandlers = {},
 }) {
   return (
     <div
@@ -624,8 +749,8 @@ export function MonthlySlidePreview({
       style={exportMode ? undefined : { animationDelay: `${index * 80}ms` }}
       data-slide-num={slideNum}
     >
-      {!exportMode && <span className="mr-slide-badge">Slide {slideNum} / 10</span>}
-      {renderSlide(slideNum, { clientName, monthLabel, agency, slideData, sections, editable, handlers })}
+      {!exportMode && <span className="mr-slide-badge">Slide {slideNum} / {SLIDE_COUNT}</span>}
+      {renderSlide(slideNum, { clientName, monthLabel, agency, slideData, sections, editable, handlers, seoHandlers, exportMode })}
     </div>
   );
 }
@@ -638,6 +763,7 @@ export function MonthlySlideGrid({
   sections,
   editable = false,
   handlers = {},
+  seoHandlers = {},
   exportMode = false,
   slidesOnly = false,
 }) {
@@ -656,6 +782,7 @@ export function MonthlySlideGrid({
           sections={sections}
           editable={editable}
           handlers={handlers}
+          seoHandlers={seoHandlers}
         />
       ))}
     </div>
@@ -674,4 +801,4 @@ export function MonthlySlideGrid({
   );
 }
 
-export { SLIDE_DEFINITIONS };
+export { SLIDE_DEFINITIONS, SLIDE_COUNT };

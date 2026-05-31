@@ -66,6 +66,21 @@ export function formatMonthLabel(dateStr) {
   return new Date(dateStr).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 }
 
+/** Short display label from verbose sheet/API text (e.g. "Auction Insights report April 1, 2026 - …" → "Apr 2026"). */
+export function formatDisplayPeriodLabel(raw, fallback = '') {
+  const s = String(raw || '').trim();
+  if (!s) return fallback;
+  if (/^[A-Za-z]{3,9}\s+\d{4}$/.test(s)) return s;
+  const m = s.match(/\b(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b[^0-9]*(\d{4})/i);
+  if (m) {
+    const d = new Date(`${m[1]} 1, ${m[2]}`);
+    if (!Number.isNaN(d.getTime())) {
+      return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+    }
+  }
+  return fallback || (s.length > 16 ? '' : s);
+}
+
 /** Compact period for table headers (e.g. "Apr 2026"). */
 export function formatPeriodShort(dateStr) {
   if (!dateStr) return '';
@@ -152,6 +167,149 @@ export const DEFAULT_SLIDE10_PROGRESS = {
   goal: 'Drive more qualified leads, improve ad quality, and continuously optimize campaigns.',
 };
 
+export const DEFAULT_SEO_EXECUTIVE_SECTIONS = {
+  notes: '',
+  websiteAnalytics: '',
+  webDevUpdates: '',
+  googleSearchConsole: '',
+  gbpPerformance: '',
+  keywordsRanking: '',
+  nextSteps: '',
+};
+
+export const DEFAULT_SEO_WEBDEV_ITEMS = [
+  { num: '01', title: 'Design Refresh', body: 'Overall look and feel revamped across key pages, establishing visual direction and UX approach.' },
+  { num: '02', title: 'Service Pages', body: 'Service pages in progress with consistent layouts and navigation.' },
+  { num: '03', title: 'Chatbot', body: 'Chatbot design and development underway to improve visitor engagement and lead capture.' },
+  { num: '04', title: 'Launch Date', body: 'Final site launch planned once remaining pages and QA are complete.' },
+];
+
+export const DEFAULT_COMPARE_SECTIONS = {
+  executiveSummary: true,
+  ga4Organic: true,
+  ga4AllChannels: true,
+  ga4LandingPages: true,
+  ga4TopCities: true,
+  gscSummary: true,
+  top20Queries: true,
+  gbp: true,
+};
+
+export const COMPARE_SECTION_OPTIONS = [
+  { key: 'executiveSummary', label: 'Executive Summary KPIs' },
+  { key: 'ga4Organic', label: 'GA4 Organic Channel' },
+  { key: 'ga4AllChannels', label: 'GA4 All Channels' },
+  { key: 'ga4LandingPages', label: 'GA4 Top Landing Pages' },
+  { key: 'ga4TopCities', label: 'GA4 Top Cities' },
+  { key: 'gscSummary', label: 'Google Search Console Summary' },
+  { key: 'top20Queries', label: 'Top 20 Search Queries' },
+  { key: 'gbp', label: 'Google Business Profile' },
+];
+
+/** Per-section comparison visibility (global compare must also be on). */
+export function isSectionCompareOn(globalCompareOn, compareSections, sectionKey) {
+  if (!globalCompareOn) return false;
+  if (!compareSections || typeof compareSections !== 'object') return true;
+  return compareSections[sectionKey] !== false;
+}
+
+export const DEFAULT_KEYWORD_TRACKER = {
+  sheetUrl: '',
+  insights: [
+    { icon: '✅', title: 'Strong Rankings', body: 'Ranking well on almost all targeted keywords within primary service areas and nearby locations.' },
+    { icon: '🔧', title: 'In Progress', body: "Some keywords not yet on Google's 1st page — actively optimizing content, metadata, and internal links." },
+    { icon: '🎯', title: 'Local Strategy', body: 'Geo-targeted content performing well across primary markets and surrounding areas.' },
+    { icon: '📈', title: 'Visibility Growth', body: 'Impressions demonstrate extensive reach; position improvements signal growing authority.' },
+  ],
+};
+
+export const DEFAULT_KEYWORD_SCREENSHOT = {
+  sheetUrl: '',
+  imageUrl: '',
+  caption: 'Paste keyword ranking table screenshot here (or add sheet URL on slide 22).',
+  subtitle: 'SEO Rankings',
+};
+
+export const DEFAULT_BLOG_UPDATES = [
+  {
+    title: 'Blog Post Title — Topic Headline',
+    overview: 'This article explains the topic, audience, and primary SEO focus for this content piece.',
+    keyThemes: [
+      'Key theme or section 1',
+      'Key theme or section 2',
+      'Key theme or section 3',
+      'Key theme or section 4',
+    ],
+    goal: 'Educate the target audience, build topical authority, and position the provider as a trusted resource.',
+  },
+  {
+    title: 'Blog Post Title — Second Topic',
+    overview: 'This article explains the second blog topic, audience, and primary SEO focus.',
+    keyThemes: [
+      'Key theme or section 1',
+      'Key theme or section 2',
+      'Key theme or section 3',
+      'Key theme or section 4',
+    ],
+    goal: 'Educate readers, build confidence in recovery strategies, and support long-term organic growth.',
+  },
+];
+
+/** @deprecated use DEFAULT_BLOG_UPDATES */
+export const DEFAULT_BLOG_CONTENT_SLIDES = DEFAULT_BLOG_UPDATES;
+
+export const DEFAULT_SEO_NEXT_STEPS = [
+  { icon: '🔍', title: 'Ongoing SEO', body: 'Continue optimizing for targeted keywords and expanding local SEO efforts for greater visibility.' },
+  { icon: '📝', title: 'Content Strategy', body: 'Focus on content creation covering key service topics to build organic authority.' },
+  { icon: '🔗', title: 'Backlink Strategy', body: 'Build domain authority through targeted link acquisition, directory listings, and strategic outreach.' },
+  { icon: '🤖', title: 'AI Optimization', body: 'Leverage AI-driven SEO techniques to maintain competitive advantage and respond to algorithm changes quickly.' },
+  { icon: '📊', title: 'Tracking & Reporting', body: 'Monthly monitoring with timely strategy adjustments to address issues and capture new growth opportunities.' },
+  { icon: '🤝', title: 'Our Commitment', body: 'We value your trust and are dedicated to long-term digital growth. Looking forward to our continued partnership.' },
+];
+
+export const KEYWORD_RANKING_COLUMNS = [
+  'keyword',
+  'googleRank',
+  'googleChange',
+  'localRank',
+  'localChange',
+  'bingRank',
+];
+
+export const KEYWORD_RANKING_CSV_HEADERS = [
+  'Keyword',
+  'Google',
+  'G. Change',
+  'Google Local',
+  'L. Change',
+  'Bing',
+];
+
+export const BACKLINKS_CSV_HEADERS = [
+  'Metric',
+  'Count',
+];
+
+export const BACKLINKS_ANCHOR_CSV_HEADERS = [
+  'Anchor Text',
+  'Domains',
+];
+
+export const DEFAULT_BACKLINKS_SUMMARY = {
+  totalBacklinks: '',
+  referringDomains: '',
+  trustFlow: '',
+  citationFlow: '',
+  linkStats: [
+    { metric: 'New Links (Last 30 Days)', count: '' },
+    { metric: 'Lost Links (Last 30 Days)', count: '' },
+    { metric: 'Follow Links', count: '' },
+    { metric: 'No-Follow Links', count: '' },
+  ],
+  topAnchors: [{ anchor: '', domains: '' }],
+  insight: '',
+};
+
 export const AUCTION_COLUMNS = [
   'domain',
   'impressionShare',
@@ -231,4 +389,47 @@ export function csvToAuctionRows(rows) {
     });
     return out;
   });
+}
+
+export function csvToKeywordRankingRows(rows) {
+  if (!Array.isArray(rows) || !rows.length) return [];
+  const keyMap = {
+    Keyword: 'keyword',
+    keyword: 'keyword',
+    Google: 'googleRank',
+    googleRank: 'googleRank',
+    'G. Change': 'googleChange',
+    googleChange: 'googleChange',
+    'Google Local': 'localRank',
+    localRank: 'localRank',
+    'L. Change': 'localChange',
+    localChange: 'localChange',
+    Bing: 'bingRank',
+    bingRank: 'bingRank',
+  };
+  return rows.map((row) => {
+    const out = {};
+    KEYWORD_RANKING_COLUMNS.forEach((col) => { out[col] = ''; });
+    Object.entries(row).forEach(([k, v]) => {
+      const mapped = keyMap[k] || keyMap[k.trim()];
+      if (mapped) out[mapped] = String(v ?? '');
+    });
+    return out;
+  });
+}
+
+export function csvToBacklinkStats(rows) {
+  if (!Array.isArray(rows) || !rows.length) return [];
+  return rows.map((row) => ({
+    metric: String(row.Metric ?? row.metric ?? ''),
+    count: String(row.Count ?? row.count ?? ''),
+  })).filter((r) => r.metric);
+}
+
+export function csvToBacklinkAnchors(rows) {
+  if (!Array.isArray(rows) || !rows.length) return [];
+  return rows.map((row) => ({
+    anchor: String(row['Anchor Text'] ?? row.anchor ?? ''),
+    domains: String(row.Domains ?? row.domains ?? ''),
+  })).filter((r) => r.anchor || r.domains);
 }

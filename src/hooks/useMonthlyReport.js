@@ -387,7 +387,12 @@ export function useMonthlyReport(reportId) {
     try {
       const { dataByAccount, overallKpis: ok, previousKpis: pk, momChanges: mc } =
         await fetchPlatformDataForAccounts(accs, ranges, { compareOn });
-      const slides = await buildMonthlySlideData(accs, ranges, { compareOn });
+      const slides = await buildMonthlySlideData(accs, ranges, {
+        compareOn,
+        clientId: options.clientId || report?.client_id || null,
+        clientName: options.clientName || report?.clients?.name || '',
+        agencyId: options.agencyId || report?.agency_id || null,
+      });
       setPlatformData(dataByAccount);
       setOverallKpis(ok);
       setPreviousKpis(pk);

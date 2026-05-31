@@ -10,6 +10,7 @@ import {
   formatMonthLabel,
   formatShortMonthLabel,
   formatBounceRate,
+  formatPeriodShort,
 } from './monthlyReportHelpers';
 
 function num(v) {
@@ -561,7 +562,33 @@ export async function buildMonthlySlideData(accounts, dateRanges, options = {}) 
   const prevGa4 = ga4Totals.previous;
   const channels = await fetchGa4SearchOverviewMetrics(ga4Ids, currentFrom, currentTo, curGa4);
 
-  if (import.meta.env.DEV && ga4Ids.length) {
+  const { fetchSeoMarketingData, emptySeoSlideData } = await import('./monthlySeoSlideData.js');
+  let seoData = emptySeoSlideData(formatPeriodShort(currentFrom), formatPeriodShort(prevFrom), compareOn);
+  if (options.clientId) {
+    try {
+      const agencyId = options.agencyId
+        || (accounts || []).find((a) => a.agency_id)?.agency_id
+        || null;
+      seoData = await fetchSeoMarketingData({
+        clientId: options.clientId,
+        agencyId,
+        clientName: options.clientName || '',
+        dateFrom: currentFrom,
+        dateTo: currentTo,
+        compareFrom: prevFrom,
+        compareTo: prevTo,
+        compareOn,
+      });
+    } catch (err) {
+      console.warn('[SEO] fetchSeoMarketingData failed (slides 1–10 unaffected):', err?.message);
+      seoData = {
+        ...emptySeoSlideData(formatPeriodShort(currentFrom), formatPeriodShort(prevFrom), compareOn),
+        error: err?.message,
+      };
+    }
+  }
+
+  if (import.meta.env.DEV && options.clientId) {
     console.info('[GA4] Slide 6 mapping (edge current → Apr card, previous → Mar card)', {
       currentPeriod: `${currentFrom} → ${currentTo}`,
       previousPeriod: compareOn ? `${prevFrom} → ${prevTo}` : 'disabled',
@@ -602,6 +629,7 @@ export async function buildMonthlySlideData(accounts, dateRanges, options = {}) 
     slide6: buildSlide6(curGa4, prevGa4, curGads, prevGads, currentShortLabel, previousShortLabel),
     slide7: buildSlide7(channels),
     slide8: { keywords },
+    seo: seoData,
   };
 }
 

@@ -7,7 +7,26 @@ import {
   fI,
   formatMonthLabel,
   formatPeriodShort,
+  formatDisplayPeriodLabel,
 } from './monthlyReportHelpers';
+import { resolveKeywordSheetUrl } from './googleSheetsEmbed';
+import {
+  normalizeAuctionSlideData,
+  resolveAuctionSheetUrl,
+  resolveAuctionSheetPreviousUrl,
+} from './auctionInsightsSheet';
+
+function mapAuctionTableRows(rows) {
+  return (rows || []).map((r) => ({
+    domain: r.domain || '',
+    impressionShare: r.impressionShare || '',
+    overlapRate: r.overlapRate || '',
+    posAbove: r.posAbove || '',
+    topPage: r.topPage || '',
+    absTop: r.absTop || '',
+    outranking: r.outranking || '',
+  }));
+}
 
 /**
  * @typedef {Object} MonthlyExportData
@@ -70,6 +89,8 @@ export function buildMonthlyExportData({
   reportFrom,
   compareFrom,
   compareOn,
+  compareSections,
+  seoManual,
 }) {
   const clientName = report?.clients?.name || 'Client';
   const monthLabel = currentLabel || formatMonthLabel(report?.report_month);
@@ -87,10 +108,50 @@ export function buildMonthlyExportData({
   const leadData = parseSectionJson(sections, 'slide3_leads', slideData?.slide3Prefill || { rows: [], statBoxes: [] });
   const slide8Insights = getSectionText(sections, 'slide8_insights', '');
   const auctionRowsRaw = parseSectionJson(sections, 'slide9_auction_data', []);
-  const auctionRows = Array.isArray(auctionRowsRaw) ? auctionRowsRaw : [];
+  const auctionData = normalizeAuctionSlideData(auctionRowsRaw);
   const auctionNotes = getSectionText(sections, 'slide9_auction_notes', '');
+  const auctionSheetUrl = resolveAuctionSheetUrl(
+    getSectionText(sections, 'slide9_auction_sheet_url', ''),
+    seoManual?.auctionSheetUrl || '',
+  );
+  const auctionSheetPreviousUrl = resolveAuctionSheetPreviousUrl(
+    getSectionText(sections, 'slide9_auction_sheet_url_previous', ''),
+    seoManual?.auctionSheetPreviousUrl || '',
+  );
   const progressRaw = parseSectionJson(sections, 'slide10_progress', DEFAULT_SLIDE10_PROGRESS);
   const progress = { ...DEFAULT_SLIDE10_PROGRESS, ...(progressRaw && typeof progressRaw === 'object' ? progressRaw : {}) };
+  const seoExecutiveRaw = parseSectionJson(sections, 'slide11_seo_executive', seoManual?.seoExecutiveSections || {});
+  const keywordTrackerRaw = parseSectionJson(sections, 'slide20_keyword_tracker', seoManual?.keywordTracker || {});
+  const keywordScreenshotRaw = parseSectionJson(sections, 'slide21_keyword_screenshot', seoManual?.keywordScreenshot || {});
+  const keywordTracker = {
+    ...(keywordTrackerRaw && typeof keywordTrackerRaw === 'object' ? keywordTrackerRaw : {}),
+    ...(seoManual?.keywordTracker && typeof seoManual.keywordTracker === 'object' ? seoManual.keywordTracker : {}),
+  };
+  const keywordScreenshot = {
+    ...(keywordScreenshotRaw && typeof keywordScreenshotRaw === 'object' ? keywordScreenshotRaw : {}),
+    ...(seoManual?.keywordScreenshot && typeof seoManual.keywordScreenshot === 'object' ? seoManual.keywordScreenshot : {}),
+  };
+  const resolvedSheetUrl = resolveKeywordSheetUrl(keywordTracker, keywordScreenshot);
+  const fromConfig = getSectionText(sections, 'seo_keyword_sheet_url', '');
+  if (!resolvedSheetUrl && fromConfig) {
+    keywordTracker.sheetUrl = fromConfig;
+  } else if (resolvedSheetUrl && !keywordTracker.sheetUrl) {
+    keywordTracker.sheetUrl = resolvedSheetUrl;
+  }
+  const compareSectionsRaw = parseSectionJson(sections, 'compare_sections', seoManual?.compareSections || {});
+  const blogContentRaw = parseSectionJson(sections, 'slide30_blog_updates', parseSectionJson(sections, 'slide27_blog_content', seoManual?.blogUpdates || []));
+  const gbpNotesRaw = (() => {
+    const raw = parseSectionJson(sections, 'slide25_gbp_notes', seoManual?.gbpNotes ?? '');
+    if (typeof raw === 'string') return raw;
+    if (raw && typeof raw === 'object') {
+      return [raw.summary, raw.calls, raw.directions, raw.website].filter(Boolean).join(' ');
+    }
+    return typeof seoManual?.gbpNotes === 'string' ? seoManual.gbpNotes : '';
+  })();
+  const gscNotesRaw = getSectionText(sections, 'slide22_gsc_notes', seoManual?.gscNotes || '');
+  const webDevRaw = parseSectionJson(sections, 'slide27_webdev', seoManual?.webDevItems || []);
+  const backlinksRaw = parseSectionJson(sections, 'slide28_backlinks', seoManual?.backlinks || {});
+  const seoNextStepsRaw = parseSectionJson(sections, 'slide30_seo_next_steps', seoManual?.seoNextSteps || []);
 
   const leadRows = (leadData.rows?.length ? leadData.rows : [{ location: clientName }]).map((r) =>
     normalizeLeadRow(r, clientName),
@@ -127,8 +188,9 @@ export function buildMonthlyExportData({
     month: monthLabel,
     preparedBy,
     website,
-    coverLogoUrl: agency?.logo_url || '/rc-logo.png',
+    coverLogoUrl: agency?.logo_url || '/rc-logo-rcs.jpg',
     compareOn: cmpOn,
+    compareSections: { ...(typeof compareSectionsRaw === 'object' && compareSectionsRaw ? compareSectionsRaw : {}), ...(compareSections && typeof compareSections === 'object' ? compareSections : {}) },
     currentLabel: monthLabel,
     previousLabel: cmpOn ? prevLabel : '',
     currentShortLabel,
@@ -175,17 +237,42 @@ export function buildMonthlyExportData({
       insight: slide8Insights || '',
     },
     auctionInsights: {
-      table: (auctionRows || []).map((r) => ({
-        domain: r.domain || '',
-        impressionShare: r.impressionShare || '',
-        overlapRate: r.overlapRate || '',
-        posAbove: r.posAbove || '',
-        topPage: r.topPage || '',
-        absTop: r.absTop || '',
-        outranking: r.outranking || '',
-      })),
+      current: {
+        periodLabel: formatDisplayPeriodLabel(auctionData.current.periodLabel, currentShortLabel),
+        table: mapAuctionTableRows(auctionData.current.rows),
+      },
+      previous: {
+        periodLabel: formatDisplayPeriodLabel(auctionData.previous.periodLabel, cmpOn ? previousShortLabel : ''),
+        table: mapAuctionTableRows(auctionData.previous.rows),
+      },
+      table: mapAuctionTableRows(auctionData.current.rows),
       insights: auctionNotes ? auctionNotes.split('\n').filter(Boolean) : [],
     },
+    auctionSheetUrl,
+    auctionSheetPreviousUrl,
+    googleAdsCustomerId: seoManual?.googleAdsCustomerId || '',
+    googleAdsCustomerIds: seoManual?.googleAdsCustomerIds || (seoManual?.googleAdsCustomerId ? [seoManual.googleAdsCustomerId] : []),
     campaignProgress: progress,
+    seo: {
+      ...(slideData?.seo || {}),
+      compareOn: cmpOn,
+      compareSections: {
+        ...(typeof compareSectionsRaw === 'object' && compareSectionsRaw ? compareSectionsRaw : {}),
+        ...(compareSections && typeof compareSections === 'object' ? compareSections : {}),
+        ...(seoManual?.compareSections && typeof seoManual.compareSections === 'object' ? seoManual.compareSections : {}),
+      },
+      executiveSections: {
+        ...((slideData?.seo?.slide11?.sections) || {}),
+        ...(seoExecutiveRaw && typeof seoExecutiveRaw === 'object' ? seoExecutiveRaw : {}),
+      },
+      keywordTracker,
+      keywordScreenshot,
+      blogUpdates: Array.isArray(blogContentRaw) ? blogContentRaw.slice(0, 2) : [],
+      gscNotes: gscNotesRaw,
+      gbpNotes: gbpNotesRaw,
+      webDevItems: Array.isArray(webDevRaw) ? webDevRaw : [],
+      backlinks: backlinksRaw,
+      seoNextSteps: Array.isArray(seoNextStepsRaw) ? seoNextStepsRaw : [],
+    },
   };
 }

@@ -17,6 +17,8 @@ export const PLATFORM_LABELS = {
   reddit_ads: 'Reddit Ads',
   tiktok_ads: 'TikTok Ads',
   ga4: 'Google Analytics (GA4)',
+  gsc: 'Google Search Console',
+  gbp: 'Google Business Profile',
   ghl: 'GHL (GoHighLevel)',
 };
 

@@ -52,7 +52,7 @@ Deno.serve(async (req)=>{
     if (!agencyId) return jsonResponse({
       error: "No agency associated with user."
     }, 400);
-    const scope = "https://www.googleapis.com/auth/analytics.readonly https://www.googleapis.com/auth/webmasters.readonly https://www.googleapis.com/auth/business.manage";
+    const scope = "https://www.googleapis.com/auth/analytics.readonly https://www.googleapis.com/auth/webmasters.readonly https://www.googleapis.com/auth/business.manage https://www.googleapis.com/auth/drive.file";
     // ── get_auth_url ──
     if (action === "get_auth_url") {
       const redirectUri = body.redirect_uri;
