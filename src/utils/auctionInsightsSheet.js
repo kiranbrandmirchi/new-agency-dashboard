@@ -1,13 +1,13 @@
 import { fetchGoogleSheetCsvTable, parseGoogleSheetsUrl } from './googleSheetsEmbed';
 import { formatDisplayPeriodLabel } from './monthlyReportHelpers';
 
-/** Shared agency auction insights workbook (all clients on one tab). */
+/** Current month auction insights workbook (May 2026 default). */
 export const DEFAULT_AUCTION_SHEET_URL =
-  'https://docs.google.com/spreadsheets/d/1DAFz1PKErha7J5xITKeEEba46Avnh2y0gW4lSqlYXLc/edit?gid=1910190295#gid=1910190295';
+  'https://docs.google.com/spreadsheets/d/1GMWAHrivl00AcWfdBobGQMV_ssV_550_Hhm2lcVPcKI/edit?gid=910004415#gid=910004415';
 
-/** Previous month auction insights workbook (March and earlier). */
+/** Previous month auction insights workbook (April 2026 default for May vs Apr comparison). */
 export const DEFAULT_AUCTION_SHEET_PREVIOUS_URL =
-  'https://docs.google.com/spreadsheets/d/1uWBm3SJPa0ZoCotVWtXTi72cIUCS5Lc-7vrd0NXVbEk/edit?gid=1905742276#gid=1905742276';
+  'https://docs.google.com/spreadsheets/d/1DAFz1PKErha7J5xITKeEEba46Avnh2y0gW4lSqlYXLc/edit?gid=1910190295#gid=1910190295';
 
 const COL = {
   accountName: ['account name'],
