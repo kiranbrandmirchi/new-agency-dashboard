@@ -1,18 +1,19 @@
 import { supabase } from '../lib/supabaseClient';
 import { resolveClientMarketingSeoConfig } from './monthlyClientSeoConfig';
+import { sanitizeApiErrorMessage } from './apiErrorMessage';
 
 async function invokeErrorMessage(error, data) {
   if (error?.context && typeof error.context.json === 'function') {
     try {
       const body = await error.context.json();
-      if (body?.error) return String(body.error);
+      if (body?.error) return sanitizeApiErrorMessage(body.error);
     } catch {
       /* ignore */
     }
   }
-  if (error?.message) return error.message;
-  if (data?.success === false && data?.error) return String(data.error);
-  if (data?.error && !data?.ga4 && !data?.gsc && !data?.gbp) return String(data.error);
+  if (error?.message) return sanitizeApiErrorMessage(error.message);
+  if (data?.success === false && data?.error) return sanitizeApiErrorMessage(data.error);
+  if (data?.error && !data?.ga4 && !data?.gsc && !data?.gbp) return sanitizeApiErrorMessage(data.error);
   return null;
 }
 
@@ -70,6 +71,11 @@ function mapGa4ChannelRow(row) {
     bounce_rate: row.bounce_rate ?? row.bounceRate,
     user_engagement_duration: row.user_engagement_duration ?? row.userEngagementDuration,
   };
+}
+
+function isNotSetLandingPage(row) {
+  const page = String(row?.landing_page || row?.page_path || row?.pagePath || row?.page || '').trim().toLowerCase();
+  return !page || page === '(not set)' || page === 'not set' || page === '(none)';
 }
 
 function mapGa4LandingRow(row) {
@@ -136,8 +142,12 @@ export function normalizeMarketingReportV2(data) {
         previous: (ga4raw.all_channels?.previous || ga4raw.channel?.previous || []).map(mapGa4ChannelRow),
       },
       landing_page: {
-        current: (ga4raw.landing_pages?.current || ga4raw.landing_page?.current || []).map(mapGa4LandingRow),
-        previous: (ga4raw.landing_pages?.previous || ga4raw.landing_page?.previous || []).map(mapGa4LandingRow),
+        current: (ga4raw.landing_pages?.current || ga4raw.landing_page?.current || [])
+          .filter((row) => !isNotSetLandingPage(row))
+          .map(mapGa4LandingRow),
+        previous: (ga4raw.landing_pages?.previous || ga4raw.landing_page?.previous || [])
+          .filter((row) => !isNotSetLandingPage(row))
+          .map(mapGa4LandingRow),
       },
       geo: {
         current: (ga4raw.cities?.current || ga4raw.geo?.current || []).map(mapGa4CityRow),
@@ -254,9 +264,9 @@ export async function invokeMarketingReportRealtime({
   const normalized = normalizeMarketingReportV2(payload || {});
 
   const partialErrors = [
-    payload?.ga4?.error && `GA4: ${payload.ga4.error}`,
-    payload?.gsc?.error && `GSC: ${payload.gsc.error}`,
-    payload?.gbp?.error && `GBP: ${payload.gbp.error}`,
+    payload?.ga4?.error && `GA4: ${sanitizeApiErrorMessage(payload.ga4.error)}`,
+    payload?.gsc?.error && `GSC: ${sanitizeApiErrorMessage(payload.gsc.error)}`,
+    payload?.gbp?.error && `GBP: ${sanitizeApiErrorMessage(payload.gbp.error)}`,
   ].filter(Boolean).join('; ') || apiError;
 
   if (import.meta.env.DEV) {

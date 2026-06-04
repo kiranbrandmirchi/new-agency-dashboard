@@ -5,6 +5,9 @@ import {
   parseSectionJson,
   getSectionText,
   DEFAULT_SLIDE2_SERVICES,
+  getEnabledSlide2Services,
+  normalizeSlide2Services,
+  SLIDE2_SERVICE_OPTIONS,
   DEFAULT_SLIDE10_PROGRESS,
   AUCTION_COLUMNS,
   AUCTION_CSV_HEADERS,
@@ -147,19 +150,20 @@ function Slide1({ clientName, monthLabel, agency, coverLogoUrl }) {
 }
 
 function Slide2({ services, editable, onChangeService, monthLabel, clientName }) {
+  const visible = getEnabledSlide2Services(services);
   return (
     <div className="mr-slide-inner">
       <Header title="What We Are Managing" right={clientName} />
-      <div className="mr-slide-main">
-        <div className="mr-slide-service-cards">
-          {(services || []).map((svc, index) => (
-            <div key={index} className="mr-slide-service-card">
+      <div className="mr-slide-main mr-slide-main--services">
+        <div className={`mr-slide-service-cards${visible.length >= 4 ? ' mr-slide-service-cards--quad' : ''}`}>
+          {visible.map((svc) => (
+            <div key={svc.key} className="mr-slide-service-card">
               <span className="mr-slide-service-card-icon">{svc.icon}</span>
               <div className="mr-slide-service-card-text">
                 {editable ? (
                   <>
-                    <EditableText className="mr-slide-service-card-title" value={svc.title} onChange={(v) => onChangeService(index, 'title', v)} />
-                    <EditableText className="mr-slide-service-card-body" value={svc.body} onChange={(v) => onChangeService(index, 'body', v)} />
+                    <EditableText className="mr-slide-service-card-title" value={svc.title} onChange={(v) => onChangeService?.(svc.key, 'title', v)} />
+                    <EditableText className="mr-slide-service-card-body" value={svc.body} onChange={(v) => onChangeService?.(svc.key, 'body', v)} />
                   </>
                 ) : (
                   <>
@@ -667,7 +671,7 @@ function renderSlide(num, props) {
   const { clientName, monthLabel, agency, slideData, sections, editable, handlers, seoHandlers, exportMode } = props;
   const compareOn = slideData?.compareOn !== false;
   const common = { monthLabel };
-  const services = handlers.slide2 ?? parseSectionJson(sections, 'slide2_services', DEFAULT_SLIDE2_SERVICES);
+  const services = handlers.slide2 ?? normalizeSlide2Services(parseSectionJson(sections, 'slide2_services', DEFAULT_SLIDE2_SERVICES));
   const leadData = handlers.slide3 ?? parseSectionJson(sections, 'slide3_leads', slideData?.slide3Prefill || { rows: [], statBoxes: [] });
   const insights = handlers.slide8 ?? getSectionText(sections, 'slide8_insights', '');
   const auctionData = handlers.slide9data ?? parseSectionJson(sections, 'slide9_auction_data', []);

@@ -14,6 +14,28 @@ function jsonRes(body, status = 200) {
     }
   });
 }
+function ga4HttpError(status, body) {
+  const trimmed = (body || "").trim();
+  if (/^<\s*(!DOCTYPE|html)/i.test(trimmed)) {
+    if (status === 502 || status === 503 || status === 504) {
+      return `Google Analytics is temporarily unavailable (${status}). Please try again in a few minutes.`;
+    }
+    if (status === 429) return "Google Analytics rate limit exceeded. Please try again later.";
+    if (status === 401 || status === 403) {
+      return `Google Analytics authorization failed (${status}). Reconnect the account in settings.`;
+    }
+    return `Google Analytics request failed (${status}).`;
+  }
+  try {
+    const parsed = JSON.parse(trimmed);
+    const apiMsg = parsed?.error?.message || parsed?.message;
+    if (apiMsg) return `GA4 ${status}: ${String(apiMsg).slice(0, 200)}`;
+  } catch {
+    /* plain text */
+  }
+  const plain = trimmed.replace(/\s+/g, " ").slice(0, 200);
+  return plain ? `GA4 ${status}: ${plain}` : `GA4 request failed (${status}).`;
+}
 async function sbGet(url, key, path) {
   const res = await fetch(url + "/rest/v1/" + path, {
     headers: {
@@ -209,7 +231,7 @@ serve(async (req)=>{
       });
       if (!res.ok) {
         const txt = await res.text();
-        throw new Error("GA4 " + res.status + ": " + txt.substring(0, 500));
+        throw new Error(ga4HttpError(res.status, txt));
       }
       return await res.json();
     }

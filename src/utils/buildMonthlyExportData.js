@@ -2,6 +2,9 @@ import {
   parseSectionJson,
   getSectionText,
   DEFAULT_SLIDE2_SERVICES,
+  DEFAULT_SEO_WEBDEV_ITEMS,
+  getEnabledSlide2Services,
+  normalizeSlide2Services,
   DEFAULT_SLIDE10_PROGRESS,
   fU,
   fI,
@@ -104,7 +107,7 @@ export function buildMonthlyExportData({
   const website = (agency?.website_url || 'redcastleservices.com').replace(/^https?:\/\//, '');
 
   const servicesRaw = parseSectionJson(sections, 'slide2_services', DEFAULT_SLIDE2_SERVICES);
-  const services = Array.isArray(servicesRaw) && servicesRaw.length ? servicesRaw : DEFAULT_SLIDE2_SERVICES;
+  const services = getEnabledSlide2Services(servicesRaw);
   const leadData = parseSectionJson(sections, 'slide3_leads', slideData?.slide3Prefill || { rows: [], statBoxes: [] });
   const slide8Insights = getSectionText(sections, 'slide8_insights', '');
   const auctionRowsRaw = parseSectionJson(sections, 'slide9_auction_data', []);
@@ -149,7 +152,7 @@ export function buildMonthlyExportData({
     return typeof seoManual?.gbpNotes === 'string' ? seoManual.gbpNotes : '';
   })();
   const gscNotesRaw = getSectionText(sections, 'slide22_gsc_notes', seoManual?.gscNotes || '');
-  const webDevRaw = parseSectionJson(sections, 'slide27_webdev', seoManual?.webDevItems || []);
+  const webDevRaw = parseSectionJson(sections, 'slide27_webdev', seoManual?.webDevItems || DEFAULT_SEO_WEBDEV_ITEMS);
   const backlinksRaw = parseSectionJson(sections, 'slide28_backlinks', seoManual?.backlinks || {});
   const seoNextStepsRaw = parseSectionJson(sections, 'slide30_seo_next_steps', seoManual?.seoNextSteps || []);
 
@@ -270,7 +273,7 @@ export function buildMonthlyExportData({
       blogUpdates: Array.isArray(blogContentRaw) ? blogContentRaw.slice(0, 2) : [],
       gscNotes: gscNotesRaw,
       gbpNotes: gbpNotesRaw,
-      webDevItems: Array.isArray(webDevRaw) ? webDevRaw : [],
+      webDevItems: Array.isArray(webDevRaw) && webDevRaw.length ? webDevRaw : DEFAULT_SEO_WEBDEV_ITEMS,
       backlinks: backlinksRaw,
       seoNextSteps: Array.isArray(seoNextStepsRaw) ? seoNextStepsRaw : [],
     },

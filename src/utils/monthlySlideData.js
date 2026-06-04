@@ -12,6 +12,7 @@ import {
   formatBounceRate,
   formatPeriodShort,
 } from './monthlyReportHelpers';
+import { sanitizeApiErrorMessage } from './apiErrorMessage';
 
 function num(v) {
   return Number(v) || 0;
@@ -36,20 +37,24 @@ function getAccountIds(accounts, platform) {
 }
 
 async function ga4InvokeErrorMessage(error, data) {
-  if (data?.error) return String(data.error);
+  if (data?.error) return sanitizeApiErrorMessage(data.error);
   if (data?.detail) {
-    return typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail).slice(0, 300);
+    const detail = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail).slice(0, 300);
+    return sanitizeApiErrorMessage(detail);
   }
   if (error?.context && typeof error.context.json === 'function') {
     try {
       const body = await error.context.json();
-      if (body?.error) return String(body.error);
-      if (body?.detail) return typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail).slice(0, 300);
+      if (body?.error) return sanitizeApiErrorMessage(body.error);
+      if (body?.detail) {
+        const detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail).slice(0, 300);
+        return sanitizeApiErrorMessage(detail);
+      }
     } catch {
       /* ignore parse errors */
     }
   }
-  return error?.message || 'GA4 edge function request failed';
+  return sanitizeApiErrorMessage(error?.message || 'GA4 edge function request failed');
 }
 
 async function fetchGadsTotals(customerIds, from, to) {

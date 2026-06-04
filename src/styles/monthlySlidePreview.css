@@ -409,6 +409,27 @@
   gap: 10px;
   flex: 1;
   justify-content: center;
+  min-height: 0;
+}
+
+.mr-slide-main--services {
+  min-height: 0;
+}
+
+.mr-slide-service-cards--quad {
+  gap: 7px;
+  justify-content: flex-start;
+  padding-top: 4px;
+}
+
+.mr-slide-service-cards--quad .mr-slide-service-card {
+  padding: 9px 12px;
+}
+
+.mr-slide2-services-config {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #e2e8f0;
 }
 
 .mr-slide-service-card {

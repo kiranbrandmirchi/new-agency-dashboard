@@ -29,6 +29,29 @@ function floatV(mv: any[], i: number): number {
   return parseFloat(mv?.[i]?.value || "0") || 0;
 }
 
+function ga4HttpError(status: number, body: string): string {
+  const trimmed = (body || "").trim();
+  if (/^<\s*(!DOCTYPE|html)/i.test(trimmed)) {
+    if (status === 502 || status === 503 || status === 504) {
+      return `Google Analytics is temporarily unavailable (${status}). Please try again in a few minutes.`;
+    }
+    if (status === 429) return "Google Analytics rate limit exceeded. Please try again later.";
+    if (status === 401 || status === 403) {
+      return `Google Analytics authorization failed (${status}). Reconnect the account in settings.`;
+    }
+    return `Google Analytics request failed (${status}).`;
+  }
+  try {
+    const parsed = JSON.parse(trimmed);
+    const apiMsg = parsed?.error?.message || parsed?.message;
+    if (apiMsg) return `GA4 ${status}: ${String(apiMsg).slice(0, 200)}`;
+  } catch {
+    /* plain text */
+  }
+  const plain = trimmed.replace(/\s+/g, " ").slice(0, 200);
+  return plain ? `GA4 ${status}: ${plain}` : `GA4 request failed (${status}).`;
+}
+
 function normalizeGa4PropertyId(id: string): string {
   const s = String(id || "").trim();
   if (!s) return "";
@@ -682,9 +705,7 @@ serve(async (req) => {
       );
       if (!res.ok) {
         const t = await res.text();
-        throw new Error(
-          "GA4 " + res.status + ": " + t.substring(0, 500)
-        );
+        throw new Error(ga4HttpError(res.status, t));
       }
       return await res.json();
     }

@@ -144,21 +144,58 @@ export const fDur = (sec) => {
 
 export const DEFAULT_SLIDE2_SERVICES = [
   {
+    key: 'ppc',
+    enabled: true,
     icon: '💰',
     title: 'Pay-Per-Click Advertising',
     body: 'Driving targeted traffic and qualified leads through paid advertising campaigns.',
   },
   {
+    key: 'geoAi',
+    enabled: true,
     icon: '📍',
     title: 'Geo AI',
     body: 'Leveraging location-based targeting to reach the right audience in each market.',
   },
   {
+    key: 'seo',
+    enabled: true,
     icon: '🔍',
     title: 'SEO',
     body: 'Improving search visibility and organic rankings through content, technical SEO, and link building.',
   },
+  {
+    key: 'webDev',
+    enabled: false,
+    icon: '🛠️',
+    title: 'Web Development',
+    body: 'Building and maintaining the website with performance, UX, and conversion-focused updates.',
+  },
 ];
+
+export const SLIDE2_SERVICE_OPTIONS = DEFAULT_SLIDE2_SERVICES.map(({ key, title }) => ({ key, label: title }));
+
+/** Merge saved slide2 data with defaults (supports legacy arrays without keys). */
+export function normalizeSlide2Services(raw) {
+  const defaults = DEFAULT_SLIDE2_SERVICES.map((d) => ({ ...d }));
+  if (!Array.isArray(raw) || !raw.length) return defaults;
+  return defaults.map((def, idx) => {
+    const byKey = raw.find((s) => s?.key === def.key);
+    const legacy = raw[idx];
+    const src = byKey || legacy;
+    if (!src || typeof src !== 'object') return def;
+    return {
+      ...def,
+      ...src,
+      key: def.key,
+      enabled: src.enabled !== undefined ? !!src.enabled : def.enabled,
+    };
+  });
+}
+
+export function getEnabledSlide2Services(services) {
+  return normalizeSlide2Services(services).filter((s) => s.enabled !== false);
+}
 
 export const DEFAULT_SLIDE10_PROGRESS = {
   overview: 'This month we focused on high-intent keywords and optimized campaigns for lead quality.',
@@ -178,10 +215,26 @@ export const DEFAULT_SEO_EXECUTIVE_SECTIONS = {
 };
 
 export const DEFAULT_SEO_WEBDEV_ITEMS = [
-  { num: '01', title: 'Design Refresh', body: 'Overall look and feel revamped across key pages, establishing visual direction and UX approach.' },
-  { num: '02', title: 'Service Pages', body: 'Service pages in progress with consistent layouts and navigation.' },
-  { num: '03', title: 'Chatbot', body: 'Chatbot design and development underway to improve visitor engagement and lead capture.' },
-  { num: '04', title: 'Launch Date', body: 'Final site launch planned once remaining pages and QA are complete.' },
+  {
+    num: '01',
+    title: 'Website Health & Performance Monitoring',
+    body: 'Monitored website uptime, page speed, and overall performance to ensure smooth user experience.',
+  },
+  {
+    num: '02',
+    title: 'Security & Maintenance Checks',
+    body: 'Conducted routine security reviews, plugin/module checks, and monitored for vulnerabilities or potential issues.',
+  },
+  {
+    num: '03',
+    title: 'Bug Monitoring & Technical Support',
+    body: 'Reviewed website functionality across key pages and forms, ensuring no critical issues affected users.',
+  },
+  {
+    num: '04',
+    title: 'Content & SEO Readiness Review',
+    body: 'Audited website content, metadata, broken links, and technical SEO elements to keep the site optimized and ready for future updates.',
+  },
 ];
 
 export const DEFAULT_COMPARE_SECTIONS = {

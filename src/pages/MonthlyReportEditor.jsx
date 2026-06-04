@@ -14,6 +14,9 @@ import {
   parseSectionJson,
   getSectionText,
   DEFAULT_SLIDE2_SERVICES,
+  getEnabledSlide2Services,
+  normalizeSlide2Services,
+  SLIDE2_SERVICE_OPTIONS,
   DEFAULT_SLIDE10_PROGRESS,
   DEFAULT_SEO_EXECUTIVE_SECTIONS,
   DEFAULT_SEO_WEBDEV_ITEMS,
@@ -67,7 +70,7 @@ export function MonthlyReportEditor({ reportId, onBack }) {
   const [exportMount, setExportMount] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const [slide2, setSlide2] = useState(DEFAULT_SLIDE2_SERVICES);
+  const [slide2, setSlide2] = useState(() => normalizeSlide2Services(DEFAULT_SLIDE2_SERVICES));
   const [slide3, setSlide3] = useState({ rows: [], statBoxes: [] });
   const [slide8, setSlide8] = useState('');
   const [slide9data, setSlide9data] = useState(() => normalizeAuctionSlideData(null));
@@ -125,7 +128,9 @@ export function MonthlyReportEditor({ reportId, onBack }) {
   }, []);
 
   useEffect(() => {
-    setSlide2(parseSectionJson(sections, 'slide2_services', DEFAULT_SLIDE2_SERVICES));
+    if ((sections || []).some((s) => s.section_key === 'slide2_services')) {
+      setSlide2(normalizeSlide2Services(parseSectionJson(sections, 'slide2_services', DEFAULT_SLIDE2_SERVICES)));
+    }
     const savedSlide3 = parseSectionJson(sections, 'slide3_leads', null);
     if (savedSlide3?.rows?.length || savedSlide3?.statBoxes?.length) {
       setSlide3(savedSlide3);
@@ -139,7 +144,9 @@ export function MonthlyReportEditor({ reportId, onBack }) {
     setAuctionSheetPreviousUrl(getSectionText(sections, 'slide9_auction_sheet_url_previous', resolveAuctionSheetPreviousUrl('', '')));
     setSlide10(parseSectionJson(sections, 'slide10_progress', DEFAULT_SLIDE10_PROGRESS));
     setSeoExecutiveSections(parseSectionJson(sections, 'slide11_seo_executive', DEFAULT_SEO_EXECUTIVE_SECTIONS));
-    setCompareSections({ ...DEFAULT_COMPARE_SECTIONS, ...parseSectionJson(sections, 'compare_sections', DEFAULT_COMPARE_SECTIONS) });
+    if ((sections || []).some((s) => s.section_key === 'compare_sections')) {
+      setCompareSections({ ...DEFAULT_COMPARE_SECTIONS, ...parseSectionJson(sections, 'compare_sections', DEFAULT_COMPARE_SECTIONS) });
+    }
     setKeywordTracker((prev) => {
       const fromSection = parseSectionJson(sections, 'slide20_keyword_tracker', DEFAULT_KEYWORD_TRACKER);
       const fromConfig = getSectionText(sections, 'seo_keyword_sheet_url', '');
@@ -317,11 +324,8 @@ export function MonthlyReportEditor({ reportId, onBack }) {
     onAuctionSheetUrl: setAuctionSheetUrl,
     onAuctionSheetPreviousUrl: setAuctionSheetPreviousUrl,
     onReloadAuctionSheet: () => loadAuctionFromSheets(),
-    onSlide2: (index, field, value) => setSlide2((prev) => {
-      const next = [...prev];
-      next[index] = { ...next[index], [field]: value };
-      return next;
-    }),
+    onSlide2: (key, field, value) => setSlide2((prev) => prev.map((s) => (s.key === key ? { ...s, [field]: value } : s))),
+    onSlide2Enabled: (key, enabled) => setSlide2((prev) => prev.map((s) => (s.key === key ? { ...s, enabled } : s))),
     onSlide3: setSlide3,
     onSlide8: setSlide8,
     onSlide9data: setSlide9data,
@@ -406,6 +410,8 @@ export function MonthlyReportEditor({ reportId, onBack }) {
     }
     try {
       await upsertSections([
+        { section_key: 'slide2_services', title: 'Slide 2 Services', content: JSON.stringify(slide2) },
+        { section_key: 'compare_sections', title: 'Compare Sections', content: JSON.stringify(compareSections) },
         { section_key: 'seo_keyword_sheet_url', title: 'Keyword sheet URL', content: keywordTracker.sheetUrl || '' },
         { section_key: 'slide20_keyword_tracker', title: 'Keyword Tracker', content: JSON.stringify(keywordTracker) },
         { section_key: 'slide9_auction_sheet_url', title: 'Auction insights sheet URL (current)', content: auctionSheetUrl },
@@ -456,7 +462,7 @@ export function MonthlyReportEditor({ reportId, onBack }) {
     } catch (err) {
       showNotification(err?.message || 'Failed to load data', 'error');
     }
-  }, [accountSelections, saveAccounts, fetchReportData, report, reportFrom, reportTo, compareOn, compareFrom, compareTo, sections, showNotification, slideData?.slide3Prefill, upsertSections, keywordTracker, auctionSheetUrl, loadAuctionFromSheets, clientName]);
+  }, [accountSelections, saveAccounts, fetchReportData, report, reportFrom, reportTo, compareOn, compareFrom, compareTo, sections, showNotification, slideData?.slide3Prefill, upsertSections, keywordTracker, auctionSheetUrl, auctionSheetPreviousUrl, loadAuctionFromSheets, clientName, slide2, compareSections]);
 
   useEffect(() => {
     if (slideData?.slide3Prefill && !getSectionText(sections, 'slide3_leads', '')) {
@@ -725,6 +731,27 @@ export function MonthlyReportEditor({ reportId, onBack }) {
                       </div>
                     </div>
                   ) : null}
+                  <div className="mr-slide2-services-config">
+                    <p className="mr-compare-sections-label">Slide 2 — What We Are Managing (include services):</p>
+                    <div className="mr-compare-sections-grid">
+                      {SLIDE2_SERVICE_OPTIONS.map(({ key, label }) => {
+                        const svc = slide2.find((s) => s.key === key);
+                        return (
+                          <label key={key} className="mr-compare-section-option">
+                            <input
+                              type="checkbox"
+                              checked={svc?.enabled !== false}
+                              disabled={isPublished}
+                              onChange={(e) => setSlide2((prev) => prev.map((s) => (
+                                s.key === key ? { ...s, enabled: e.target.checked } : s
+                              )))}
+                            />
+                            <span>{label}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
               </div>
 

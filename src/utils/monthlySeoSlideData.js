@@ -196,8 +196,14 @@ function channelTotals(rows) {
   };
 }
 
+function isNotSetLandingPage(row) {
+  const page = String(row?.landing_page || row?.page_path || row?.page || '').trim().toLowerCase();
+  return !page || page === '(not set)' || page === 'not set' || page === '(none)';
+}
+
 function buildLandingPagesTable(rows, limit = 10) {
   return [...(rows || [])]
+    .filter((row) => !isNotSetLandingPage(row))
     .sort((a, b) => num(b.sessions) - num(a.sessions))
     .slice(0, limit)
     .map((row) => ({
@@ -214,7 +220,7 @@ function landingTotals(rows) {
   let activeUsers = 0;
   let newUsers = 0;
   let durationWeighted = 0;
-  (rows || []).forEach((row) => {
+  (rows || []).filter((row) => !isNotSetLandingPage(row)).forEach((row) => {
     const s = num(row.sessions);
     sessions += s;
     activeUsers += num(row.active_users || row.total_users);

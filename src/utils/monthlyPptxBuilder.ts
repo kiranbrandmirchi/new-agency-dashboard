@@ -371,17 +371,22 @@ function addContentSlide2(pptx: PptxGenJS, data: MonthlyExportData) {
   const slide = pptx.addSlide();
   redHeader(slide, 'What We Are Managing', data.client);
   contentBackground(slide);
-  const cardH = 1.02;
-  const gap = 0.09;
-  const startY = MAIN_Y + 0.28;
   const services = Array.isArray(data.services) ? data.services : [];
+  const count = Math.max(services.length, 1);
+  const notesReserve = 0.88;
+  const gap = 0.08;
+  const avail = FOOTER_Y - MAIN_Y - notesReserve;
+  const cardH = Math.min(1.02, Math.max(0.72, (avail - gap * (count - 1)) / count));
+  const startY = MAIN_Y + Math.max(0.08, (avail - (cardH * count + gap * (count - 1))) / 2);
+  const bodyFont = count >= 4 ? 9 : 10;
+  const titleFont = count >= 4 ? 11 : 12;
   services.forEach((svc, i) => {
     const y = startY + i * (cardH + gap);
     slide.addShape('rect', { x: 0.35, y, w: 9.3, h: cardH, fill: { color: C.white } });
     slide.addShape('rect', { x: 0.35, y, w: 0.08, h: cardH, fill: { color: C.redBar } });
-    slide.addText(svc.icon, { x: 0.55, y: y + 0.25, w: 0.45, h: 0.4, fontSize: 20 });
-    slide.addText(svc.title, { x: 1.05, y: y + 0.15, w: 8.4, h: 0.3, fontSize: 12, bold: true, color: C.darkGray });
-    slide.addText(svc.body, { x: 1.05, y: y + 0.48, w: 8.4, h: 0.75, fontSize: 10, color: C.slate, lineSpacing: 14 });
+    slide.addText(svc.icon, { x: 0.55, y: y + cardH * 0.22, w: 0.45, h: cardH * 0.45, fontSize: count >= 4 ? 18 : 20 });
+    slide.addText(svc.title, { x: 1.05, y: y + cardH * 0.12, w: 8.4, h: cardH * 0.28, fontSize: titleFont, bold: true, color: C.darkGray });
+    slide.addText(svc.body, { x: 1.05, y: y + cardH * 0.4, w: 8.4, h: cardH * 0.52, fontSize: bodyFont, color: C.slate, lineSpacing: count >= 4 ? 12 : 14 });
   });
   addBottomNotesBox(slide, 'Notes', [], 'Service scope and campaign notes.');
   redFooter(slide, data.month);
