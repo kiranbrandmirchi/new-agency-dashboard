@@ -40,6 +40,7 @@ function mapAuctionTableRows(rows) {
  * @property {string} preparedBy
  * @property {string} website
  * @property {string} coverLogoUrl
+ * @property {string} [coverSlideImageDataUrl]
  * @property {string} currentLabel
  * @property {string} previousLabel
  * @property {string} comparisonHeader

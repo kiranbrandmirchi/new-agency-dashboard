@@ -19,6 +19,7 @@ export type MonthlyExportData = {
   preparedBy: string;
   website: string;
   coverLogoUrl: string;
+  coverSlideImageDataUrl?: string;
   compareOn?: boolean;
   currentLabel: string;
   previousLabel: string;
@@ -259,9 +260,21 @@ function tableBottomY(startY: number, dataRowCount: number, rowH: number, header
   return startY + headerH + dataRowCount * rowH;
 }
 
-/** Slide 1 — Cover (34% red | 66% dark, matches preview layout) */
+/** Slide 1 — Cover (HTML capture when available, else programmatic layout) */
 function addCoverSlide(pptx: PptxGenJS, data: MonthlyExportData, logoDataUrl: string | null) {
   const slide = pptx.addSlide();
+
+  if (data.coverSlideImageDataUrl) {
+    slide.addImage({
+      data: data.coverSlideImageDataUrl,
+      x: 0,
+      y: 0,
+      w: SLIDE_W_IN,
+      h: SLIDE_H,
+    });
+    return;
+  }
+
   const leftPad = 0.35;
   const rightPad = COVER_RIGHT_X_IN + 0.15;
 

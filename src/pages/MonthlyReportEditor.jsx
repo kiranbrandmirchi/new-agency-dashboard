@@ -6,6 +6,7 @@ import { useMonthlyReport, getMonthRange } from '../hooks/useMonthlyReport';
 import { MonthlySlideGrid } from '../components/MonthlySlidePreview';
 import { DateRangePicker } from '../components/DatePicker';
 import { generateMonthlyPdf, waitForPaint } from '../utils/generateMonthlyPdf';
+import { captureMonthlySlide } from '../utils/monthlySlideCapture';
 import { generateMonthlyPptx, generateMonthlyPptxBlob } from '../utils/generateMonthlyPptx.js';
 import { uploadMonthlyReportToGoogleDrive, requestGoogleDriveAccessToken, getCachedGoogleDriveAccessToken } from '../utils/googleDriveExport.js';
 import { buildMonthlyExportData } from '../utils/buildMonthlyExportData';
@@ -483,7 +484,7 @@ export function MonthlyReportEditor({ reportId, onBack }) {
     }
   }, [slideData?.seo, sections]);
 
-  const getSlideElementsForExport = useCallback(async () => {
+  const mountExportSlides = useCallback(async () => {
     if (!dataApplied && !isPublished) {
       throw new Error('Apply report configuration and load slides before exporting');
     }
@@ -491,20 +492,34 @@ export function MonthlyReportEditor({ reportId, onBack }) {
     await waitForPaint();
     await sleep(500);
     if (document.fonts?.ready) await document.fonts.ready;
+  }, [dataApplied, isPublished]);
+
+  const getSlideElementsForExport = useCallback(async () => {
+    await mountExportSlides();
     const slideEls = exportRef.current?.querySelectorAll('.mr-slide-card');
     if (!slideEls?.length) throw new Error('No slides available to export');
     return Array.from(slideEls);
-  }, [dataApplied, isPublished]);
+  }, [mountExportSlides]);
+
+  const captureCoverSlideImage = useCallback(async () => {
+    try {
+      await mountExportSlides();
+      const slide1 = exportRef.current?.querySelector('.mr-slide-card[data-slide-num="1"]');
+      if (!slide1) throw new Error('Cover slide not available to export');
+      const canvas = await captureMonthlySlide(slide1);
+      return canvas.toDataURL('image/png');
+    } finally {
+      setExportMount(false);
+    }
+  }, [mountExportSlides]);
 
   const handleExportPpt = useCallback(async () => {
     setGeneratingFormat('ppt');
     try {
       if (!report) throw new Error('Report not loaded');
       if (!reportFrom || !reportTo) throw new Error('Set report date range before exporting');
-      if (!dataApplied && !isPublished) {
-        showNotification('Tip: Apply & Load Slides first for live metrics in the deck', 5000);
-      }
-      const payload = buildExportPayload();
+      const coverSlideImageDataUrl = await captureCoverSlideImage();
+      const payload = { ...buildExportPayload(), coverSlideImageDataUrl };
       const googleAccessToken = getCachedGoogleDriveAccessToken();
       await generateMonthlyPptx(payload, { clientName, monthLabel, googleAccessToken });
       showNotification(`PowerPoint downloaded: ${clientName} — ${monthLabel}`);
@@ -515,7 +530,7 @@ export function MonthlyReportEditor({ reportId, onBack }) {
     } finally {
       setGeneratingFormat(null);
     }
-  }, [buildExportPayload, report, reportFrom, reportTo, dataApplied, isPublished, clientName, monthLabel, showNotification]);
+  }, [buildExportPayload, captureCoverSlideImage, report, reportFrom, reportTo, clientName, monthLabel, showNotification]);
 
   const handleExportGoogleSlides = useCallback(async () => {
     setGeneratingFormat('gslides');
@@ -523,7 +538,8 @@ export function MonthlyReportEditor({ reportId, onBack }) {
       if (!report) throw new Error('Report not loaded');
       if (!reportFrom || !reportTo) throw new Error('Set report date range before exporting');
       let accessToken = await requestGoogleDriveAccessToken();
-      const payload = buildExportPayload();
+      const coverSlideImageDataUrl = await captureCoverSlideImage();
+      const payload = { ...buildExportPayload(), coverSlideImageDataUrl };
       const { resolveKeywordSheetUrl, fetchGoogleSheetFormattedGrid, fetchGoogleSheetCsvTable } = await import('../utils/googleSheetsEmbed');
       const sheetUrl = resolveKeywordSheetUrl(payload.seo?.keywordTracker, payload.seo?.keywordScreenshot);
       if (sheetUrl) {
@@ -579,7 +595,7 @@ export function MonthlyReportEditor({ reportId, onBack }) {
     } finally {
       setGeneratingFormat(null);
     }
-  }, [buildExportPayload, report, reportFrom, reportTo, clientName, monthLabel, showNotification]);
+  }, [buildExportPayload, captureCoverSlideImage, report, reportFrom, reportTo, clientName, monthLabel, showNotification]);
 
   const handleExportPdf = useCallback(async () => {
     setGeneratingFormat('pdf');
