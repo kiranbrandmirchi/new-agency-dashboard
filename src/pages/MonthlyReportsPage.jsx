@@ -220,51 +220,97 @@ export function MonthlyReportsPage() {
           <p>Create and manage monthly performance reports for clients</p>
         </div>
 
-        <div className="panel" style={{ marginBottom: 24 }}>
+        <div className="panel mr-reports-create-panel">
+          <div className="panel-header">
+            <div>
+              <h3>Create report</h3>
+              <p className="panel-subtitle">
+                Pick a client and month, then open the slide editor to build the deck.
+              </p>
+            </div>
+          </div>
           <div className="panel-body">
-            <div className="gads-filter-group" style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end' }}>
-              <div>
-                <label className="gads-filter-label">Client</label>
-                <select
-                  className="client-selector"
-                  value={selectedClientId}
-                  onChange={(e) => setSelectedClientId(e.target.value)}
-                  style={{ minWidth: 200 }}
-                >
-                  <option value="">All clients</option>
-                  {clients.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
+            <div className="gads-filter-bar mr-reports-filter-bar">
+              <div className="gads-filter-row">
+                <div className="gads-filter-group mr-reports-fg-client">
+                  <label>Client</label>
+                  <select
+                    value={selectedClientId}
+                    onChange={(e) => setSelectedClientId(e.target.value)}
+                    disabled={!clients.length}
+                  >
+                    <option value="">
+                      {clients.length ? 'Select a client' : 'No clients available'}
+                    </option>
+                    {clients.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="gads-filter-group gads-fg-sm">
+                  <label>Report month</label>
+                  <select
+                    value={selectedMonth}
+                    onChange={(e) => setSelectedMonth(e.target.value)}
+                  >
+                    {MONTH_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="gads-filter-group gads-filter-actions">
+                  <label className="mr-reports-actions-label">Actions</label>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={handleCreateReport}
+                    disabled={creating || !selectedClientId || !selectedMonth}
+                  >
+                    {creating ? 'Creating…' : 'Create report'}
+                  </button>
+                </div>
               </div>
-              <div>
-                <label className="gads-filter-label">Month</label>
-                <select
-                  className="client-selector"
-                  value={selectedMonth}
-                  onChange={(e) => setSelectedMonth(e.target.value)}
-                  style={{ minWidth: 180 }}
-                >
-                  {MONTH_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </select>
-              </div>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={handleCreateReport}
-                disabled={creating || !selectedClientId || !selectedMonth}
-              >
-                {creating ? 'Creating…' : 'Create Report'}
-              </button>
             </div>
           </div>
         </div>
 
         <div className="panel">
+          <div className="panel-header">
+            <div>
+              <h3>Existing reports</h3>
+              <p className="panel-subtitle">
+                Filter by client and month. Click a row to open, or use Duplicate for the next month.
+              </p>
+            </div>
+          </div>
           <div className="panel-body">
-            <h3 style={{ margin: '0 0 16px', fontSize: 16 }}>Existing Reports</h3>
+            <div className="gads-filter-bar mr-reports-filter-bar" style={{ marginBottom: 16 }}>
+              <div className="gads-filter-row">
+                <div className="gads-filter-group mr-reports-fg-client">
+                  <label>Filter — client</label>
+                  <select
+                    value={selectedClientId}
+                    onChange={(e) => setSelectedClientId(e.target.value)}
+                  >
+                    <option value="">All clients</option>
+                    {clients.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="gads-filter-group gads-fg-sm">
+                  <label>Filter — month</label>
+                  <select
+                    value={selectedMonth}
+                    onChange={(e) => setSelectedMonth(e.target.value)}
+                  >
+                    {MONTH_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
             {loading ? (
               <div className="gads-loading"><div className="gads-spinner" /> Loading…</div>
             ) : reports.length === 0 ? (

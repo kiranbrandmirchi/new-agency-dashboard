@@ -28,7 +28,7 @@ Deno.serve(async (req)=>{
     let dateFrom = body.date_from || "";
     let dateTo = body.date_to || "";
     const daysBack = body.days_back || 5;
-    log("=== GA4 SYNC V6 (triple report) ===");
+    log("=== GA4 SYNC V8 (VDP only, no page_rules) ===");
     log("Mode: " + mode + " | customer: " + customerId);
     if (!customerId) return jsonRes({
       error: "customer_id required"
@@ -40,13 +40,12 @@ Deno.serve(async (req)=>{
     }
     log("Date range: " + dateFrom + " to " + dateTo);
     // --- Credential lookup ---
-    const cpaRows = await sbGet(SB_URL, SB_KEY, `client_platform_accounts?platform_customer_id=eq.${customerId}&platform=eq.ga4&is_active=eq.true&select=credential_id,agency_id,client_id,clients(website_platform)`);
+    const cpaRows = await sbGet(SB_URL, SB_KEY, `client_platform_accounts?platform_customer_id=eq.${customerId}&platform=eq.ga4&is_active=eq.true&select=credential_id,agency_id,client_id`);
     if (!cpaRows?.length) return jsonRes({
       error: "No GA4 account for " + customerId
     }, 400);
-    const { credential_id: credentialId, agency_id: agencyId } = cpaRows[0];
-    const websitePlatform = cpaRows[0]?.clients?.website_platform || "custom";
-    log("Platform: " + websitePlatform);
+    const { credential_id: credentialId, agency_id: agencyId, client_id: clientId } = cpaRows[0];
+    log("client_id: " + clientId);
     if (!credentialId) return jsonRes({
       error: "No credential_id linked"
     }, 400);
@@ -81,6 +80,28 @@ Deno.serve(async (req)=>{
     const TOKEN = tokenData.access_token;
     log("Token OK");
     // --- Helpers ---
+    function ga4HttpError(status, body) {
+      const trimmed = (body || "").trim();
+      if (/^<\s*(!DOCTYPE|html)/i.test(trimmed)) {
+        if (status === 502 || status === 503 || status === 504) {
+          return `Google Analytics is temporarily unavailable (${status}). Please try again in a few minutes.`;
+        }
+        if (status === 429) return "Google Analytics rate limit exceeded. Please try again later.";
+        if (status === 401 || status === 403) {
+          return `Google Analytics authorization failed (${status}). Reconnect the account in settings.`;
+        }
+        return `Google Analytics request failed (${status}).`;
+      }
+      try {
+        const parsed = JSON.parse(trimmed);
+        const apiMsg = parsed?.error?.message || parsed?.message;
+        if (apiMsg) return `GA4 ${status}: ${String(apiMsg).slice(0, 200)}`;
+      } catch {
+        /* plain text */
+      }
+      const plain = trimmed.replace(/\s+/g, " ").slice(0, 200);
+      return plain ? `GA4 ${status}: ${plain}` : `GA4 request failed (${status}).`;
+    }
     async function runReport(reportBody) {
       const url = `https://analyticsdata.googleapis.com/v1beta/properties/${customerId}:runReport`;
       const res = await fetch(url, {
@@ -93,7 +114,7 @@ Deno.serve(async (req)=>{
       });
       if (!res.ok) {
         const txt = await res.text();
-        throw new Error("GA4 " + res.status + ": " + txt.substring(0, 300));
+        throw new Error(ga4HttpError(res.status, txt));
       }
       return await res.json();
     }
@@ -136,23 +157,55 @@ Deno.serve(async (req)=>{
       }
       return inserted;
     }
-    // --- Load page rules ---
-    const rules = await sbGet(SB_URL, SB_KEY, `ga4_page_rules?or=(customer_id.eq.${customerId},and(customer_id.is.null,platform.eq.${websitePlatform}),and(customer_id.is.null,platform.eq.custom))&is_active=eq.true&order=priority.asc`) || [];
-    rules.sort((a, b)=>{
-      const aSpec = a.customer_id ? 0 : a.platform === websitePlatform ? 1 : 2;
-      const bSpec = b.customer_id ? 0 : b.platform === websitePlatform ? 1 : 2;
-      if (aSpec !== bSpec) return aSpec - bSpec;
-      return (a.priority || 100) - (b.priority || 100);
-    });
-    log("Page rules loaded: " + rules.length);
-    function classifyPage(_loc, pagePath) {
-      if (!rules?.length) return null;
-      for (const rule of rules){
+    // ══════════════════════════════════════════════════════════════
+    // Load VDP pattern from clients.vdp_url_pattern
+    // ══════════════════════════════════════════════════════════════
+    let vdpPatternRaw = null;
+    if (clientId) {
+      const clientRows = await sbGet(SB_URL, SB_KEY, `clients?id=eq.${clientId}&select=vdp_url_pattern`);
+      vdpPatternRaw = clientRows?.[0]?.vdp_url_pattern || null;
+    }
+    log("VDP pattern raw: " + (vdpPatternRaw || "(none)"));
+    function buildVdpMatchers(patternStr) {
+      if (!patternStr) return [];
+      const parts = patternStr.split(/\s+OR\s+/i).map((p)=>p.trim()).filter(Boolean);
+      const matchers = [];
+      for (const raw of parts){
         try {
-          if (new RegExp(rule.url_pattern, "i").test(pagePath)) return rule.page_type;
-        } catch  {}
+          const regex = new RegExp(raw, "i");
+          const rawLower = raw.toLowerCase();
+          matchers.push({
+            regex,
+            raw,
+            hasNewIndicator: rawLower.includes("/new-") || rawLower.includes("/new/") || rawLower.includes("/new-inventory") || rawLower.includes("/new+") || rawLower.includes("-new-") || rawLower === "/product/new-" || rawLower.includes("/inventory/new"),
+            hasUsedIndicator: rawLower.includes("/used-") || rawLower.includes("/used/") || rawLower.includes("/used-inventory") || rawLower.includes("/used+") || rawLower.includes("-used-") || rawLower === "/product/used-" || rawLower.includes("/inventory/used") || rawLower.includes("pre-owned")
+          });
+        } catch  {
+          log("  WARN: Could not compile VDP regex: " + raw);
+        }
       }
-      return null;
+      return matchers;
+    }
+    const vdpMatchers = buildVdpMatchers(vdpPatternRaw);
+    log("VDP matchers built: " + vdpMatchers.length + " patterns");
+    // ══════════════════════════════════════════════════════════════
+    // classifyPage: VDP or Non-VDP. No fallback rules.
+    // ══════════════════════════════════════════════════════════════
+    function classifyPage(pageLocation, pagePath) {
+      const pathLower = (pagePath || "").toLowerCase();
+      const locLower = (pageLocation || "").toLowerCase();
+      if (vdpMatchers.length > 0) {
+        for (const matcher of vdpMatchers){
+          if (matcher.regex.test(pagePath) || matcher.regex.test(pageLocation)) {
+            if (matcher.hasNewIndicator && !matcher.hasUsedIndicator) return "VDP_New";
+            if (matcher.hasUsedIndicator && !matcher.hasNewIndicator) return "VDP_Used";
+            if (pathLower.includes("/new-") || pathLower.includes("/new/") || pathLower.includes("/new+") || pathLower.includes("-new-") || pathLower.includes("/product/new-") || pathLower.includes("/inventory/new") || pathLower.includes("/new-inventory") || locLower.includes("/new-") || locLower.includes("/new/") || locLower.includes("/inventory/new")) return "VDP_New";
+            if (pathLower.includes("/used-") || pathLower.includes("/used/") || pathLower.includes("/used+") || pathLower.includes("-used-") || pathLower.includes("/product/used-") || pathLower.includes("/inventory/used") || pathLower.includes("/used-inventory") || pathLower.includes("pre-owned") || locLower.includes("/used-") || locLower.includes("/used/") || locLower.includes("/inventory/used")) return "VDP_Used";
+            return "VDP";
+          }
+        }
+      }
+      return "Non-VDP";
     }
     // --- Date list ---
     const dates = [];
@@ -168,7 +221,7 @@ Deno.serve(async (req)=>{
     for (const dateStr of dates){
       log("\n--- " + dateStr + " ---");
       try {
-        // ========== REPORT 1: Session-level (accurate KPIs) ==========
+        // ========== REPORT 1: Session-level ==========
         log("  R1: Session-level...");
         const r1 = await runReport({
           dateRanges: [
@@ -326,7 +379,7 @@ Deno.serve(async (req)=>{
           log("  R1 inserted: " + ins1);
           totalSummaryRows += ins1;
         }
-        // ========== REPORT 2: Page-level (for pages/VDP tabs) ==========
+        // ========== REPORT 2: Page-level ==========
         log("  R2: Page-level...");
         const r2 = await runReport({
           dateRanges: [
@@ -436,7 +489,7 @@ Deno.serve(async (req)=>{
           log("  R2 inserted: " + ins2);
           totalPageRows += ins2;
         }
-        // ========== REPORT 3: Event-level (event name × channel × source/medium) ==========
+        // ========== REPORT 3: Event-level ==========
         log("  R3: Event-level...");
         const r3 = await runReport({
           dateRanges: [

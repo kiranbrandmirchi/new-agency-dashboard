@@ -22,6 +22,7 @@ import { GA4Page } from './pages/GA4Page';
 import { GhlLeadsPage } from './pages/GhlLeadsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
+import { PptReportPage } from './pages/PptReportPage';
 import { Admin } from './pages/Admin';
 
 const PLACEHOLDER_PAGES = {
@@ -50,6 +51,7 @@ function CurrentPage() {
   if (currentPage === 'bing-ads') return <BingPage />;
   if (currentPage === 'agency-reports') return <AgencyReportsPage />;
   if (currentPage === 'monthly-reports') return <MonthlyReportsPage />;
+  if (currentPage === 'ppt-report') return <PptReportPage />;
   if (currentPage === 'ga4' || currentPage === 'ga4-advanced') return <GA4Page />;
   if (currentPage === 'ghl') return <GhlLeadsPage />;
   if (currentPage === 'settings') return <SettingsPage />;
@@ -82,11 +84,20 @@ const DashboardLayoutContent = React.memo(function DashboardLayoutContent({ curr
   return <CurrentPage />;
 });
 
+const PATH_TO_PAGE = {
+  '/ppt-report': 'ppt-report',
+};
+
 function DashboardLayout() {
   const { showNotification, currentPage, showPage } = useApp();
   const { userName, hasPermission, loading, isAuthenticated } = useAuth();
   const location = useLocation();
   const welcomeShown = useRef(false);
+
+  useEffect(() => {
+    const pageId = PATH_TO_PAGE[location.pathname];
+    if (pageId && pageId !== currentPage) showPage(pageId);
+  }, [location.pathname, currentPage, showPage]);
 
   useEffect(() => {
     if (userName && !welcomeShown.current) {
@@ -158,6 +169,11 @@ export default function App() {
         <Route path="/oauth/callback" element={<OAuthCallback />} />
         <Route path="/dashboard" element={<Navigate to="/" replace />} />
         <Route path="/admin" element={
+          <ProtectedRoute>
+            <DashboardLayout />
+          </ProtectedRoute>
+        } />
+        <Route path="/ppt-report" element={
           <ProtectedRoute>
             <DashboardLayout />
           </ProtectedRoute>

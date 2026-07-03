@@ -87,6 +87,22 @@ export const NAV_ITEMS = [
   { id: 'seo',       label: 'SEO Performance',      icon: '🔍', section: 'Insights', permission: 'sidebar.seo' },
   { id: 'agency-reports', label: 'Agency Reports',   icon: '📋', section: 'Agency Reports', permission: 'sidebar.agency_reports' },
   { id: 'monthly-reports', label: 'Monthly Reports', icon: '📅', section: 'Agency Reports', permission: 'sidebar.monthly_reports' },
+  {
+    id: 'ppt-report',
+    label: 'PPT Report',
+    section: 'Agency Reports',
+    permission: 'sidebar.ppt_report',
+    route: '/ppt-report',
+    logo: (
+      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden>
+        <rect width="24" height="24" rx="4" fill="#D24726" />
+        <path d="M7 7h7.5L17 10.5V17H7V7z" fill="#fff" opacity="0.95" />
+        <path d="M14.5 7v3.5H18" stroke="#fff" strokeWidth="1.2" fill="none" />
+        <rect x="8.5" y="12" width="7" height="1.2" rx="0.6" fill="#D24726" />
+        <rect x="8.5" y="14.2" width="5" height="1.2" rx="0.6" fill="#D24726" />
+      </svg>
+    ),
+  },
   { id: 'creatives', label: 'Creative Analysis',     icon: '🎨', section: 'Insights', permission: 'sidebar.creatives' },
   { id: 'events',    label: 'Events / Special',      icon: '🎪', section: 'Insights', permission: 'sidebar.events' },
   { id: 'settings',  label: 'White-Label Settings',  icon: '⚙️', section: 'System', permission: 'sidebar.settings' },

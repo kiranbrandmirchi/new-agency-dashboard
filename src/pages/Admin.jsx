@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../context/AuthContext';
 
 const PLATFORMS = ['google_ads', 'facebook_ads', 'bing_ads', 'tiktok_ads', 'pinterest_ads', 'reddit_ads', 'snapchat_ads', 'linkedin_ads'];
-const CLIENT_PLATFORMS = ['google_ads', 'reddit', 'meta', 'bing', 'tiktok', 'ga4', 'ghl'];
+const CLIENT_PLATFORMS = ['google_ads', 'reddit', 'meta', 'bing', 'tiktok', 'ga4', 'gsc', 'gbp', 'ghl'];
 
 function formatRelativeTime(dateStr) {
   if (!dateStr) return 'Never';
@@ -1041,6 +1041,7 @@ function AdminRolesTab({ onMessage, setLoading }) {
 function AdminClientsTab({ onMessage, setLoading, agencyId, isSuperAdmin }) {
   const [accounts, setAccounts] = useState([]);
   const [clients, setClients] = useState([]);
+  const [search, setSearch] = useState('');
   const [addModal, setAddModal] = useState(false);
   const [addClientModal, setAddClientModal] = useState(false);
   const [addClientAgencyId, setAddClientAgencyId] = useState('');
@@ -1212,9 +1213,32 @@ function AdminClientsTab({ onMessage, setLoading, agencyId, isSuperAdmin }) {
     else { onMessage('Client assigned'); loadAccounts(); }
   };
 
+  const filteredAccounts = accounts.filter((a) => {
+    const s = search.trim().toLowerCase();
+    if (!s) return true;
+    const clientName = a.clients?.name || '';
+    const agencyName = a.agencies?.agency_name || '';
+    const haystack = [
+      a.account_name,
+      a.platform_customer_id,
+      a.platform,
+      clientName,
+      agencyName,
+      a.sync_status,
+    ].filter(Boolean).join(' ').toLowerCase();
+    return haystack.includes(s);
+  });
+
   return (
     <div className="admin-card">
-      <div className="admin-toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
+      <div className="admin-toolbar" style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+        <input
+          type="text"
+          placeholder="Search account, client, platform, customer ID..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="admin-search"
+        />
         <button
           type="button"
           className="btn btn-primary"
@@ -1254,7 +1278,15 @@ function AdminClientsTab({ onMessage, setLoading, agencyId, isSuperAdmin }) {
               </tr>
             </thead>
             <tbody>
-              {accounts.map((a) => (
+              {filteredAccounts.length === 0 ? (
+                <tr>
+                  <td colSpan={isSuperAdmin ? 9 : 8} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>
+                    {accounts.length === 0
+                      ? 'No platform accounts yet. Click Add Account to link GA4, GSC, GBP, etc.'
+                      : 'No accounts match your search.'}
+                  </td>
+                </tr>
+              ) : filteredAccounts.map((a) => (
                 <tr key={a.id}>
                   <td>{a.account_name || '—'}</td>
                   <td>

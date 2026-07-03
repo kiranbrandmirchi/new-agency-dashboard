@@ -7,34 +7,47 @@ import { useApp } from '../context/AppContext';
 
 const GMT5_OFFSET_MS = -5 * 60 * 60 * 1000;
 
-function nowGMT5() { return new Date(Date.now() + GMT5_OFFSET_MS); }
+function nowGMT5() {
+  return new Date(Date.now() + GMT5_OFFSET_MS);
+}
 
 function fmtYMD(d) {
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 function computeDateRange(preset, customFrom, customTo) {
   const today = nowGMT5();
   const fmt = (d) => fmtYMD(d);
-  const daysAgo = (n) => new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - n));
+  const daysAgo = (n) => { const d = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - n)); return d; };
   switch (preset) {
     case 'today': return { from: fmt(today), to: fmt(today) };
     case 'yesterday': return { from: fmt(daysAgo(1)), to: fmt(daysAgo(1)) };
     case 'last7': return { from: fmt(daysAgo(6)), to: fmt(today) };
     case 'last14': return { from: fmt(daysAgo(13)), to: fmt(today) };
     case 'last30': return { from: fmt(daysAgo(29)), to: fmt(today) };
-    case 'this_month': { const y = today.getUTCFullYear(), m = today.getUTCMonth(); return { from: fmt(new Date(Date.UTC(y, m, 1))), to: fmt(today) }; }
-    case 'last_month': { const y = today.getUTCFullYear(), m = today.getUTCMonth(); return { from: fmt(new Date(Date.UTC(y, m - 1, 1))), to: fmt(new Date(Date.UTC(y, m, 0))) }; }
+    case 'this_month': {
+      const y = today.getUTCFullYear(), m = today.getUTCMonth();
+      const first = new Date(Date.UTC(y, m, 1));
+      return { from: fmt(first), to: fmt(today) };
+    }
+    case 'last_month': {
+      const y = today.getUTCFullYear(), m = today.getUTCMonth();
+      const first = new Date(Date.UTC(y, m - 1, 1));
+      const last = new Date(Date.UTC(y, m, 0));
+      return { from: fmt(first), to: fmt(last) };
+    }
     case 'custom': return { from: customFrom || null, to: customTo || null };
     default: return { from: null, to: null };
   }
 }
 
-/** Same length as primary range, immediately before `from` (matches Google Ads / GA4 reports). */
 function computePreviousPeriod(fromStr, toStr) {
   if (!fromStr || !toStr) return { from: null, to: null };
-  const from = new Date(`${fromStr}T00:00:00`);
-  const to = new Date(`${toStr}T00:00:00`);
+  const from = new Date(fromStr + 'T00:00:00');
+  const to = new Date(toStr + 'T00:00:00');
   const days = Math.round((to - from) / 86400000) + 1;
   const prevTo = new Date(from);
   prevTo.setDate(prevTo.getDate() - 1);
@@ -211,15 +224,19 @@ export function useCombinedDashboardData() {
       };
 
       // Google Ads - uses buildQuery (date column = 'date')
+      // NOTE: ordering by date alone is non-deterministic when many rows share the same date,
+      // which causes paginated fetches (offset/limit) to occasionally duplicate or drop rows
+      // and inflates per-account totals on multi-customer queries. Tiebreak on the PK (id) so
+      // PostgREST returns a strictly stable order across pages.
       let gadsData = [];
       let gadsCmp = [];
       if (byPlatform.google_ads.length > 0) {
         const gadsPrimary = sbFetchAllParallel(buildQuery('gads_campaign_daily', {
-          customerIds: byPlatform.google_ads, dateFrom: from, dateTo: to, extra: '&order=date.desc',
+          customerIds: byPlatform.google_ads, dateFrom: from, dateTo: to, extra: '&order=date.desc,id.asc',
         }));
         if (filters.compareOn && cmpFrom && cmpTo) {
           const gadsCompareQ = sbFetchAllParallel(buildQuery('gads_campaign_daily', {
-            customerIds: byPlatform.google_ads, dateFrom: cmpFrom, dateTo: cmpTo, extra: '&order=date.desc',
+            customerIds: byPlatform.google_ads, dateFrom: cmpFrom, dateTo: cmpTo, extra: '&order=date.desc,id.asc',
           }));
           [gadsData, gadsCmp] = await Promise.all([safe(gadsPrimary), safe(gadsCompareQ)]);
         } else {

@@ -20,7 +20,7 @@ const AUTH_DISABLED =
   ['true', '1', 'yes'].includes(String(import.meta.env.VITE_AUTH_DISABLED || '').toLowerCase()) ||
   (typeof window !== 'undefined' && sessionStorage.getItem('auth_skip') === '1');
 
-const SUPABASE_TIMEOUT_MS = 8000;
+const SUPABASE_TIMEOUT_MS = 20000;
 
 function withTimeout(promise, ms) {
   return Promise.race([
@@ -51,6 +51,11 @@ export function AuthProvider({ children }) {
   const [canViewAllCustomers, setCanViewAllCustomers] = useState(false);
   const [profileLoaded, setProfileLoaded] = useState(false);
   const lastProfileLoad = useRef({ userId: null, at: 0 });
+  // Tracks the userId for which a profile was successfully loaded in this
+  // browser session. Used to short-circuit redundant re-fetches that Supabase's
+  // onAuthStateChange triggers on tab focus / network resume, which were the
+  // source of the "Failed to load profile" bounce-outs on transient errors.
+  const profileLoadedForUser = useRef(null);
   const activeAgencyIdRef = useRef(null);
   const PROFILE_LOAD_DEBOUNCE_MS = 2000;
 
@@ -104,6 +109,14 @@ export function AuthProvider({ children }) {
 
   const loadUserProfile = useCallback(async (userId, authUser = null) => {
     if (!userId) {
+      setProfileLoaded(true);
+      return;
+    }
+    // If we've already loaded this user's profile successfully in this session,
+    // skip the entire re-fetch. Supabase fires SIGNED_IN events on tab/window
+    // focus which would otherwise re-run the whole query chain and risk a
+    // transient timeout kicking the user out to the "Failed to load" screen.
+    if (profileLoadedForUser.current === userId) {
       setProfileLoaded(true);
       return;
     }
@@ -236,6 +249,7 @@ export function AuthProvider({ children }) {
       setAllowedClientsStable(clients);
       setAllowedPlatformAccountsStable(platformMap);
       setAllowedClientAccountsStable(clientAccounts);
+      profileLoadedForUser.current = userId;
       setProfileLoaded(true);
 
       if (isSuperAdmin) {
@@ -264,6 +278,15 @@ export function AuthProvider({ children }) {
       }
     } catch (err) {
       console.warn('[Auth] loadUserProfile error:', err);
+      // If we already loaded this user's profile successfully earlier in the
+      // session, keep using the cached state instead of bouncing the user to
+      // the "Failed to load profile" screen on a transient network blip.
+      // The lastProfileLoad debounce will let the next auth event retry.
+      if (profileLoadedForUser.current === userId) {
+        lastProfileLoad.current = { userId: null, at: 0 };
+        setProfileLoaded(true);
+        return;
+      }
       setAuthError('Failed to load profile. Try refreshing.');
       setProfileLoaded(true);
     }
@@ -440,6 +463,7 @@ export function AuthProvider({ children }) {
         }
       } else {
         lastProfileLoad.current = { userId: null, at: 0 };
+        profileLoadedForUser.current = null;
         setUserProfile(null);
         setAgency(null);
         setAgencyId(null);
@@ -519,6 +543,8 @@ export function AuthProvider({ children }) {
 
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();
+    profileLoadedForUser.current = null;
+    lastProfileLoad.current = { userId: null, at: 0 };
     setSession(null);
     setUser(null);
     setUserProfile(null);

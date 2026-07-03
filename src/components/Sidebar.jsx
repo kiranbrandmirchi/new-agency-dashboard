@@ -82,11 +82,15 @@ export const Sidebar = React.memo(function Sidebar() {
                 <li>
                   <a
                     href="#"
-                    className={currentPage === item.id ? 'active' : ''}
+                    className={currentPage === item.id || (item.route && location.pathname === item.route) ? 'active' : ''}
                     data-tooltip={item.label}
                     onClick={(e) => {
                       e.preventDefault();
-                      if (location.pathname === '/admin') navigate('/');
+                      if (item.route) {
+                        navigate(item.route);
+                      } else if (location.pathname === '/admin' || location.pathname === '/ppt-report') {
+                        navigate('/');
+                      }
                       showPage(item.id);
                     }}
                   >
