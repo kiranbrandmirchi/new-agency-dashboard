@@ -13,6 +13,7 @@ import {
   formatPeriodShort,
 } from './monthlyReportHelpers';
 import { sanitizeApiErrorMessage } from './apiErrorMessage';
+import { fetchSeoMarketingData, emptySeoSlideData } from './monthlySeoSlideData.js';
 
 function num(v) {
   return Number(v) || 0;
@@ -567,7 +568,6 @@ export async function buildMonthlySlideData(accounts, dateRanges, options = {}) 
   const prevGa4 = ga4Totals.previous;
   const channels = await fetchGa4SearchOverviewMetrics(ga4Ids, currentFrom, currentTo, curGa4);
 
-  const { fetchSeoMarketingData, emptySeoSlideData } = await import('./monthlySeoSlideData.js');
   let seoData = emptySeoSlideData(formatPeriodShort(currentFrom), formatPeriodShort(prevFrom), compareOn);
   if (options.clientId) {
     try {

@@ -123,7 +123,7 @@ const td = { fontSize: 9, color: C.darkGray, fill: C.white, valign: 'middle' as 
 const tdCenter = { ...td, align: 'center' as const };
 const border = { pt: 0.5, color: C.tableBorder };
 
-type TableRow = Array<string | { text: string; options?: Record<string, unknown> }>;
+type TableRow = Array<{ text: string; options?: Record<string, unknown> }>;
 
 /** Native PowerPoint table — clean borders, editable cells in PowerPoint. */
 function addDataTable(
@@ -139,7 +139,7 @@ function addDataTable(
   },
 ) {
   if (!rows?.length) return;
-  slide.addTable(rows, {
+  slide.addTable(rows as PptxGenJS.TableRow[], {
     x: layout.x ?? TABLE_X,
     y: layout.y,
     w: layout.w ?? TABLE_W,

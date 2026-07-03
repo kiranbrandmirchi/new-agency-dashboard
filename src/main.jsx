@@ -12,6 +12,12 @@ import { AuthProvider } from './context/AuthContext';
 import { AppProvider } from './context/AppContext';
 import App from './App';
 
+/** After a new deploy, cached index.html may reference removed JS chunks — reload once. */
+window.addEventListener('vite:preloadError', (event) => {
+  event.preventDefault();
+  window.location.reload();
+});
+
 if (!document.getElementById('wow-dashboard-global-styles')) {
   const g = document.createElement('style');
   g.id = 'wow-dashboard-global-styles';
