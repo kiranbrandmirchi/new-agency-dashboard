@@ -22,8 +22,6 @@ import {
   fetchPaidAdsFloridaPerformanceData,
 } from '../utils/fetchPptSlide6PerformanceData';
 import { SlidePreviewGrid } from '../components/SlidePreviewGrid';
-import { ReportLogoSection } from '../components/ReportLogoSection';
-import { useReportLogo } from '../hooks/useReportLogo';
 
 function getMonthOptions() {
   const options = [];
@@ -59,24 +57,9 @@ const PdfIcon = () => (
 );
 
 export function PptReportPage() {
-  const { agencyId, activeAgencyId, displayAgency } = useAuth();
+  const { agencyId, activeAgencyId } = useAuth();
   const { showNotification } = useApp();
   const effectiveAgencyId = activeAgencyId || agencyId;
-  const reportLogo = useReportLogo(effectiveAgencyId);
-  const {
-    coverLogoUrl,
-    reportLogoUrl,
-    savedReportLogoUrl,
-    setReportLogoUrl,
-    logoDirty,
-    logoBusy,
-    uploadingLogo,
-    savingLogo,
-    resettingLogo,
-    handleReportLogoUpload,
-    handleSaveReportLogo,
-    handleResetReportLogo,
-  } = reportLogo;
 
   const [clients, setClients] = useState([]);
   const [selectedClientId, setSelectedClientId] = useState('');
@@ -195,11 +178,8 @@ export function PptReportPage() {
   ]);
 
   const baseReportData = useMemo(
-    () => ({
-      ...buildReportDataForSelection(selectedClientName, selectedMonthLabel, selectedMonth),
-      coverLogoUrl,
-    }),
-    [selectedClientName, selectedMonthLabel, selectedMonth, coverLogoUrl],
+    () => buildReportDataForSelection(selectedClientName, selectedMonthLabel, selectedMonth),
+    [selectedClientName, selectedMonthLabel, selectedMonth],
   );
 
   useEffect(() => {
@@ -351,19 +331,9 @@ export function PptReportPage() {
   return (
     <div className="page-section active" id="page-ppt-report">
       <div className="page-content">
-        <div
-          className="page-title-bar"
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}
-        >
-          <div>
-            <h2>PPT Report Download</h2>
-            <p>Download reports and exports from this area.</p>
-          </div>
-          <img
-            src={coverLogoUrl}
-            alt={displayAgency?.agency_name || 'Red Castle Services'}
-            style={{ maxHeight: 48, maxWidth: 200, objectFit: 'contain', flexShrink: 0 }}
-          />
+        <div className="page-title-bar">
+          <h2>PPT Report Download</h2>
+          <p>Download reports and exports from this area.</p>
         </div>
 
         <div className="panel">
@@ -376,21 +346,6 @@ export function PptReportPage() {
             </div>
           </div>
           <div className="panel-body">
-            <ReportLogoSection
-              coverLogoUrl={coverLogoUrl}
-              reportLogoUrl={reportLogoUrl}
-              savedReportLogoUrl={savedReportLogoUrl}
-              onReportLogoUrlChange={setReportLogoUrl}
-              onUpload={handleReportLogoUpload}
-              onSave={handleSaveReportLogo}
-              onReset={handleResetReportLogo}
-              logoDirty={logoDirty}
-              logoBusy={logoBusy}
-              uploadingLogo={uploadingLogo}
-              savingLogo={savingLogo}
-              resettingLogo={resettingLogo}
-              effectiveAgencyId={effectiveAgencyId}
-            />
             <div className="gads-filter-row">
               <div className="gads-filter-group gads-fg-sm">
                 <label>Clients List</label>

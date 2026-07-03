@@ -1,7 +1,7 @@
 import PptxGenJS from 'pptxgenjs';
 import type { ReportData } from '../data/reportData';
 import { buildReportFileName } from './reportFileName';
-import { loadLogoForDarkBackground, getDataUrlImageSize, fitInBox } from './loadImageDataUrl';
+import { loadImageDataUrl } from './loadImageDataUrl';
 import {
   COVER_LEFT_W_IN,
   COVER_RIGHT_W_IN,
@@ -10,10 +10,9 @@ import {
   SLIDE_W_IN,
 } from './slideDimensions';
 
-const COVER_LOGO_MAX_W = 2.5;
-const COVER_LOGO_MAX_H = 0.55;
-const COVER_LOGO_MARGIN_R = 0.45;
-const COVER_LOGO_Y = 0.35;
+const COVER_LOGO_X = SLIDE_W_IN - 1.55;
+const COVER_LOGO_Y = 0.34;
+const COVER_LOGO_SIZE = 0.4;
 
 /** Colors aligned with preview / reference deck */
 const C = {
@@ -177,7 +176,7 @@ function addSlideBottomInsight(slide: PptxSlide, data: ReportData, slideNum: num
 }
 
 /** Slide 1 — Cover (34% red | 66% dark, matches preview layout) */
-async function addCoverSlide(pptx: PptxGenJS, data: ReportData, logoDataUrl: string | null) {
+function addCoverSlide(pptx: PptxGenJS, data: ReportData, logoDataUrl: string | null) {
   const slide = pptx.addSlide();
   const leftPad = 0.35;
   const rightPad = COVER_RIGHT_X_IN + 0.15;
@@ -228,18 +227,33 @@ async function addCoverSlide(pptx: PptxGenJS, data: ReportData, logoDataUrl: str
     valign: 'top',
   });
 
-  // Right column — full brand logo top-right, title, client, footer
+  // Right column — logo top-right, title, client, footer
+  slide.addShape('rect', {
+    x: COVER_LOGO_X,
+    y: COVER_LOGO_Y,
+    w: COVER_LOGO_SIZE,
+    h: COVER_LOGO_SIZE,
+    fill: { color: C.white },
+  });
   if (logoDataUrl) {
-    const { width, height } = await getDataUrlImageSize(logoDataUrl);
-    const { w, h } = fitInBox(width, height, COVER_LOGO_MAX_W, COVER_LOGO_MAX_H);
     slide.addImage({
       data: logoDataUrl,
-      x: SLIDE_W_IN - w - COVER_LOGO_MARGIN_R,
+      x: COVER_LOGO_X,
       y: COVER_LOGO_Y,
-      w,
-      h,
+      w: COVER_LOGO_SIZE,
+      h: COVER_LOGO_SIZE,
     });
   }
+  slide.addText('RED CASTLE\nSERVICES', {
+    x: SLIDE_W_IN - 1.1,
+    y: COVER_LOGO_Y,
+    w: 1.05,
+    h: 0.48,
+    fontSize: 7,
+    bold: true,
+    color: C.white,
+    lineSpacing: 10,
+  });
   slide.addText('SEO & Digital\nMarketing\nUpdates', {
     x: rightPad,
     y: 0.72,
@@ -730,9 +744,9 @@ export async function generatePptx(data: ReportData, options: GeneratePptxOption
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_16x9';
 
-  const logoDataUrl = await loadLogoForDarkBackground(data.coverLogoUrl ?? '/rc-brand-logo.png');
+  const logoDataUrl = await loadImageDataUrl(data.coverLogoUrl ?? '/rc-logo.png');
 
-  await addCoverSlide(pptx, data, logoDataUrl);
+  addCoverSlide(pptx, data, logoDataUrl);
   addContentSlide2(pptx, data);
   addLeadSummarySlide(pptx, data);
   addSectionSlide(pptx, data);
