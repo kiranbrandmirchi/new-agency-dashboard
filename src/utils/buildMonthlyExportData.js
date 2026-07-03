@@ -19,6 +19,8 @@ import {
   resolveAuctionSheetPreviousUrl,
 } from './auctionInsightsSheet';
 
+export const DEFAULT_COVER_LOGO_URL = '/brand-logo.png';
+
 function mapAuctionTableRows(rows) {
   return (rows || []).map((r) => ({
     domain: r.domain || '',
@@ -191,7 +193,7 @@ export function buildMonthlyExportData({
     month: monthLabel,
     preparedBy,
     website,
-    coverLogoUrl: agency?.logo_url || '/rc-logo-rcs.jpg',
+    coverLogoUrl: DEFAULT_COVER_LOGO_URL,
     compareOn: cmpOn,
     compareSections: { ...(typeof compareSectionsRaw === 'object' && compareSectionsRaw ? compareSectionsRaw : {}), ...(compareSections && typeof compareSections === 'object' ? compareSections : {}) },
     currentLabel: monthLabel,

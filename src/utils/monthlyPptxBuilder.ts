@@ -3,6 +3,7 @@ import { buildReportFileName } from './reportFileName';
 import { loadLogoForDarkBackground } from './loadImageDataUrl';
 import { addSeoSlidesToPptx } from './monthlySeoPptxBuilder';
 import { formatDisplayPeriodLabel } from './monthlyReportHelpers';
+import { DEFAULT_COVER_LOGO_URL } from './buildMonthlyExportData';
 import {
   COVER_LEFT_W_IN,
   COVER_RIGHT_W_IN,
@@ -313,11 +314,11 @@ function addCoverSlide(pptx: PptxGenJS, data: MonthlyExportData, logoDataUrl: st
     valign: 'top',
   });
 
-  // Right column — logo vertically centered, title caps
-  const logoW = 1.15;
-  const logoH = 1.15;
+  // Right column — logo top-right, title caps
+  const logoW = 1.65;
+  const logoH = 0.42;
   const logoX = SLIDE_W_IN - logoW - 0.45;
-  const logoY = (SLIDE_H - logoH) / 2;
+  const logoY = COVER_LOGO_Y;
   if (logoDataUrl) {
     slide.addImage({
       data: logoDataUrl,
@@ -979,7 +980,7 @@ export async function buildEditableMonthlyPptx(
   pptx.author = 'Red Castle Services';
   pptx.title = `${options.clientName} — ${options.monthLabel}`;
 
-  const logoDataUrl = await loadLogoForDarkBackground(data.coverLogoUrl ?? '/rc-logo-rcs.jpg');
+  const logoDataUrl = await loadLogoForDarkBackground(data.coverLogoUrl ?? DEFAULT_COVER_LOGO_URL);
 
   addCoverSlide(pptx, data, logoDataUrl);
   addContentSlide2(pptx, data);

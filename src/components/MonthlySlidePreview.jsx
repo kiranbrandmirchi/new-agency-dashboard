@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef } from 'react';
 import { CsvUploader } from './CsvUploader';
 import { useLogoForDarkBackground } from '../utils/loadImageDataUrl';
+import { DEFAULT_COVER_LOGO_URL } from '../utils/buildMonthlyExportData';
 import {
   parseSectionJson,
   getSectionText,
@@ -125,7 +126,7 @@ function NotesBox({ title = 'Notes', children }) {
 function Slide1({ clientName, monthLabel, agency, coverLogoUrl }) {
   const preparedBy = agency?.agency_name || 'Red Castle Services';
   const website = (agency?.website_url || 'redcastleservices.com').replace(/^https?:\/\//, '');
-  const logoSrc = useLogoForDarkBackground(coverLogoUrl || '/rc-logo-rcs.jpg');
+  const logoSrc = useLogoForDarkBackground(coverLogoUrl || DEFAULT_COVER_LOGO_URL);
   return (
     <div className="mr-slide-inner mr-slide-cover">
       <div className="mr-slide-cover-left">
@@ -693,7 +694,7 @@ function renderSlide(num, props) {
   }
 
   switch (num) {
-    case 1: return <Slide1 clientName={clientName} monthLabel={monthLabel} agency={agency} coverLogoUrl={agency?.logo_url || '/rc-logo-rcs.jpg'} />;
+    case 1: return <Slide1 clientName={clientName} monthLabel={monthLabel} agency={agency} coverLogoUrl={DEFAULT_COVER_LOGO_URL} />;
     case 2: return <Slide2 services={services} editable={editable} onChangeService={handlers.onSlide2} clientName={clientName} {...common} />;
     case 3: return (
       <Slide3

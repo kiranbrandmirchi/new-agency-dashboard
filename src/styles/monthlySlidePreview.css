@@ -301,16 +301,16 @@
 
 .mr-slide-cover-logo {
   position: absolute;
-  top: 50%;
+  top: 6%;
   right: 6%;
-  transform: translateY(-50%);
+  transform: none;
   z-index: 2;
   background: transparent;
   padding: 0;
 }
 
 .mr-slide-cover-logo-img {
-  width: clamp(72px, 10cqi, 110px);
+  width: clamp(100px, 14cqi, 165px);
   height: auto;
   object-fit: contain;
   display: block;
