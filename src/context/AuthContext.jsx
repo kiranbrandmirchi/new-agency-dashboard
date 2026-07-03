@@ -392,6 +392,13 @@ export function AuthProvider({ children }) {
     }
   }, [userProfile?.is_super_admin, userRole]);
 
+  const patchAgencyFields = useCallback((agencyIdToPatch, fields) => {
+    if (!agencyIdToPatch) return;
+    setAgency((a) => (a?.id === agencyIdToPatch ? { ...a, ...fields } : a));
+    setActiveAgency((a) => (a?.id === agencyIdToPatch ? { ...a, ...fields } : a));
+    setAllAgencies((list) => list.map((a) => (a.id === agencyIdToPatch ? { ...a, ...fields } : a)));
+  }, []);
+
   const agencyFromSelection = activeAgencyId && allAgencies.length > 0 ? allAgencies.find((a) => a.id === activeAgencyId) : null;
   const displayAgencyForBranding = activeAgency ?? agencyFromSelection ?? (userProfile?.is_super_admin || userRole?.toLowerCase() === 'super_admin' ? agency : null);
   const BRAND_DEFAULTS = { primary: '#E12627', accent: '#0083CB' };
@@ -590,6 +597,7 @@ export function AuthProvider({ children }) {
     displayAgency,
     setActiveAgencyId,
     refreshAllAgencies,
+    patchAgencyFields,
     isImpersonating,
     allAgencies,
     permissions,
@@ -619,6 +627,7 @@ export function AuthProvider({ children }) {
     displayAgency,
     setActiveAgencyId,
     refreshAllAgencies,
+    patchAgencyFields,
     isImpersonating,
     allAgencies,
     permissions,

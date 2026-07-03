@@ -301,16 +301,20 @@
 
 .mr-slide-cover-logo {
   position: absolute;
-  top: 50%;
+  top: 6%;
   right: 6%;
-  transform: translateY(-50%);
+  transform: none;
   z-index: 2;
   background: transparent;
   padding: 0;
+  overflow: hidden;
+  line-height: 0;
 }
 
 .mr-slide-cover-logo-img {
-  width: clamp(72px, 10cqi, 110px);
+  max-width: clamp(100px, 14cqi, 120px);
+  max-height: clamp(28px, 4cqi, 36px);
+  width: auto;
   height: auto;
   object-fit: contain;
   display: block;

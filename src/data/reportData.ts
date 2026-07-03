@@ -9,7 +9,7 @@ export const reportData = {
   preparedBy: 'Red Castle Services',
   website: 'redcastleservices.com',
   /** Cover slide logo (public/) — used in preview, PDF, and PPTX */
-  coverLogoUrl: '/rc-logo.png',
+  coverLogoUrl: '/rc-brand-logo.png',
 
   services: [
     {

@@ -1,6 +1,6 @@
 import PptxGenJS from 'pptxgenjs';
 import { buildReportFileName } from './reportFileName';
-import { loadLogoForDarkBackground } from './loadImageDataUrl';
+import { loadLogoForDarkBackground, getDataUrlImageSize, fitInBox } from './loadImageDataUrl';
 import { addSeoSlidesToPptx } from './monthlySeoPptxBuilder';
 import { formatDisplayPeriodLabel } from './monthlyReportHelpers';
 import {
@@ -63,9 +63,10 @@ export type MonthlyExportData = {
   seo?: Record<string, unknown>;
 };
 
-const COVER_LOGO_X = SLIDE_W_IN - 1.55;
-const COVER_LOGO_Y = 0.34;
-const COVER_LOGO_SIZE = 0.4;
+const COVER_LOGO_MAX_W = 2.5;
+const COVER_LOGO_MAX_H = 0.55;
+const COVER_LOGO_MARGIN_R = 0.45;
+const COVER_LOGO_Y = 0.35;
 
 /** Colors aligned with preview / reference deck */
 const C = {
@@ -259,7 +260,7 @@ function tableBottomY(startY: number, dataRowCount: number, rowH: number, header
 }
 
 /** Slide 1 — Cover (34% red | 66% dark, matches preview layout) */
-function addCoverSlide(pptx: PptxGenJS, data: MonthlyExportData, logoDataUrl: string | null) {
+async function addCoverSlide(pptx: PptxGenJS, data: MonthlyExportData, logoDataUrl: string | null) {
   const slide = pptx.addSlide();
   const leftPad = 0.35;
   const rightPad = COVER_RIGHT_X_IN + 0.15;
@@ -313,19 +314,16 @@ function addCoverSlide(pptx: PptxGenJS, data: MonthlyExportData, logoDataUrl: st
     valign: 'top',
   });
 
-  // Right column — logo vertically centered, title caps
-  const logoW = 1.15;
-  const logoH = 1.15;
-  const logoX = SLIDE_W_IN - logoW - 0.45;
-  const logoY = (SLIDE_H - logoH) / 2;
+  // Right column — full brand logo top-right, title caps
   if (logoDataUrl) {
+    const { width, height } = await getDataUrlImageSize(logoDataUrl);
+    const { w, h } = fitInBox(width, height, COVER_LOGO_MAX_W, COVER_LOGO_MAX_H);
     slide.addImage({
       data: logoDataUrl,
-      x: logoX,
-      y: logoY,
-      w: logoW,
-      h: logoH,
-      sizing: { type: 'contain', w: logoW, h: logoH },
+      x: SLIDE_W_IN - w - COVER_LOGO_MARGIN_R,
+      y: COVER_LOGO_Y,
+      w,
+      h,
     });
   }
   slide.addText('SEO & DIGITAL\nMARKETING\nUPDATES', {
@@ -979,9 +977,9 @@ export async function buildEditableMonthlyPptx(
   pptx.author = 'Red Castle Services';
   pptx.title = `${options.clientName} — ${options.monthLabel}`;
 
-  const logoDataUrl = await loadLogoForDarkBackground(data.coverLogoUrl ?? '/rc-logo-rcs.jpg');
+  const logoDataUrl = await loadLogoForDarkBackground(data.coverLogoUrl ?? '/rc-brand-logo.png');
 
-  addCoverSlide(pptx, data, logoDataUrl);
+  await addCoverSlide(pptx, data, logoDataUrl);
   addContentSlide2(pptx, data);
   addLeadSummarySlide(pptx, data);
   addSectionSlide(pptx, data);

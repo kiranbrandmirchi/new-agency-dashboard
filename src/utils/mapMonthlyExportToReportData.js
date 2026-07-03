@@ -49,7 +49,7 @@ export function mapMonthlyExportToReportData(monthly) {
     month: monthly.month || cur,
     preparedBy: monthly.preparedBy || 'Red Castle Services',
     website: monthly.website || 'redcastleservices.com',
-    coverLogoUrl: monthly.coverLogoUrl || '/rc-logo.png',
+    coverLogoUrl: monthly.coverLogoUrl || '/rc-brand-logo.png',
     services: Array.isArray(monthly.services) ? monthly.services : [],
     leadSummary: {
       tableRow: {

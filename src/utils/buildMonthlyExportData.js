@@ -85,6 +85,7 @@ function buildStatBoxes(rows, currentLabel, previousLabel, compareOn) {
 export function buildMonthlyExportData({
   report,
   agency,
+  coverLogoUrl: coverLogoUrlOverride,
   sections,
   slideData,
   currentLabel,
@@ -191,7 +192,7 @@ export function buildMonthlyExportData({
     month: monthLabel,
     preparedBy,
     website,
-    coverLogoUrl: agency?.logo_url || '/rc-logo-rcs.jpg',
+    coverLogoUrl: coverLogoUrlOverride || agency?.report_logo_url || '/rc-brand-logo.png',
     compareOn: cmpOn,
     compareSections: { ...(typeof compareSectionsRaw === 'object' && compareSectionsRaw ? compareSectionsRaw : {}), ...(compareSections && typeof compareSections === 'object' ? compareSections : {}) },
     currentLabel: monthLabel,

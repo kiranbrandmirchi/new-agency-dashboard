@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef } from 'react';
 import { reportData } from '../data/reportData';
 import { ReportPreviewContext, useReport, useReportPreview } from './reportPreviewContext';
+import { useLogoForDarkBackground } from '../utils/loadImageDataUrl';
 import '../styles/pptSlidePreview.css';
 
 function EditableText({ value, onChange, className }) {
@@ -88,6 +89,7 @@ function SlideBottomInsight({ slideNum }) {
 /** Slide 1 — client name + report month from UI selections */
 function CoverSlide() {
   const report = useReport();
+  const logoSrc = useLogoForDarkBackground(report.coverLogoUrl || '/rc-brand-logo.png');
   return (
     <div className="ppt-slide-inner ppt-cover">
       <div className="ppt-cover-body">
@@ -103,13 +105,7 @@ function CoverSlide() {
       </div>
       <div className="ppt-cover-right">
         <div className="ppt-cover-logo">
-          <div className="ppt-cover-logo-icon">
-            <img src={report.coverLogoUrl} alt="" />
-          </div>
-          <div className="ppt-cover-logo-text">
-            RED CASTLE
-            <span>SERVICES</span>
-          </div>
+          <img src={logoSrc} alt="Red Castle Services" className="ppt-cover-logo-img" />
         </div>
         <h2 className="ppt-cover-title">
           SEO &amp; Digital

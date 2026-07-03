@@ -3,7 +3,8 @@ import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { supabase } from '../lib/supabaseClient';
 import { useMonthlyReport, getMonthRange } from '../hooks/useMonthlyReport';
-import { MonthlySlideGrid } from '../components/MonthlySlidePreview';
+import { ReportLogoSection } from '../components/ReportLogoSection';
+import { useReportLogo } from '../hooks/useReportLogo';
 import { DateRangePicker } from '../components/DatePicker';
 import { generateMonthlyPdf, waitForPaint } from '../utils/generateMonthlyPdf';
 import { generateMonthlyPptx, generateMonthlyPptxBlob } from '../utils/generateMonthlyPptx.js';
@@ -53,6 +54,11 @@ export function MonthlyReportEditor({ reportId, onBack }) {
   } = useMonthlyReport(reportId);
 
   const [agency, setAgency] = useState(null);
+  const reportLogo = useReportLogo(effectiveAgencyId, {
+    onSaved: (url) => setAgency((a) => (a ? { ...a, report_logo_url: url } : a)),
+    onReset: () => setAgency((a) => (a ? { ...a, report_logo_url: null } : a)),
+  });
+  const { coverLogoUrl } = reportLogo;
   const [clients, setClients] = useState([]);
   const [clientAccounts, setClientAccounts] = useState([]);
   const [accountSelections, setAccountSelections] = useState({});
@@ -264,6 +270,7 @@ export function MonthlyReportEditor({ reportId, onBack }) {
   const buildExportPayload = useCallback(() => buildMonthlyExportData({
     report,
     agency,
+    coverLogoUrl,
     sections: [
       ...(sections || []).filter((s) => ![
         'slide2_services', 'slide3_leads', 'slide8_insights', 'slide9_auction_data', 'slide9_auction_notes', 'slide9_auction_sheet_url', 'slide9_auction_sheet_url_previous', 'slide10_progress',
@@ -314,7 +321,7 @@ export function MonthlyReportEditor({ reportId, onBack }) {
       googleAdsCustomerId,
       googleAdsCustomerIds,
     },
-  }), [report, agency, sections, slide2, slide3, slide8, slide9data, slide9notes, slide10, seoExecutiveSections, compareSections, keywordTracker, keywordScreenshot, gbpNotes, gscNotes, webDevItems, backlinks, seoNextSteps, blogUpdates, gscSiteUrl, gbpLocationId, slideData, monthLabel, previousLabel, reportFrom, compareFrom, compareOn, auctionSheetUrl, auctionSheetPreviousUrl, googleAdsCustomerId, googleAdsCustomerIds]);
+  }), [report, agency, coverLogoUrl, sections, slide2, slide3, slide8, slide9data, slide9notes, slide10, seoExecutiveSections, compareSections, keywordTracker, keywordScreenshot, gbpNotes, gscNotes, webDevItems, backlinks, seoNextSteps, blogUpdates, gscSiteUrl, gbpLocationId, slideData, monthLabel, previousLabel, reportFrom, compareFrom, compareOn, auctionSheetUrl, auctionSheetPreviousUrl, googleAdsCustomerId, googleAdsCustomerIds]);
 
   const handlers = useMemo(() => ({
     slide2, slide3, slide8, slide9data, slide9notes, slide10,
@@ -672,6 +679,22 @@ export function MonthlyReportEditor({ reportId, onBack }) {
           <div className="panel mr-config-bar">
             <div className="panel-body">
               <h3>Report configuration</h3>
+              <ReportLogoSection
+                className="mr-report-logo-section"
+                coverLogoUrl={reportLogo.coverLogoUrl}
+                reportLogoUrl={reportLogo.reportLogoUrl}
+                savedReportLogoUrl={reportLogo.savedReportLogoUrl}
+                onReportLogoUrlChange={reportLogo.setReportLogoUrl}
+                onUpload={reportLogo.handleReportLogoUpload}
+                onSave={reportLogo.handleSaveReportLogo}
+                onReset={reportLogo.handleResetReportLogo}
+                logoDirty={reportLogo.logoDirty}
+                logoBusy={reportLogo.logoBusy}
+                uploadingLogo={reportLogo.uploadingLogo}
+                savingLogo={reportLogo.savingLogo}
+                resettingLogo={reportLogo.resettingLogo}
+                effectiveAgencyId={effectiveAgencyId}
+              />
               <div className="mr-config-top">
                 <div className="mr-config-client">
                   <label>Client</label>
@@ -863,6 +886,7 @@ export function MonthlyReportEditor({ reportId, onBack }) {
                 clientName={clientName}
                 monthLabel={monthLabel}
                 agency={agency}
+                coverLogoUrl={coverLogoUrl}
                 slideData={enrichedSlideData}
                 sections={sections}
                 editable={!isPublished}
@@ -885,6 +909,7 @@ export function MonthlyReportEditor({ reportId, onBack }) {
               clientName={clientName}
               monthLabel={monthLabel}
               agency={agency}
+              coverLogoUrl={coverLogoUrl}
               slideData={enrichedSlideData}
               sections={sections}
               editable={false}
@@ -944,6 +969,7 @@ export function MonthlyReportEditor({ reportId, onBack }) {
             clientName={clientName}
             monthLabel={monthLabel}
             agency={agency}
+            coverLogoUrl={coverLogoUrl}
             slideData={enrichedSlideData}
             sections={sections}
             editable={false}
