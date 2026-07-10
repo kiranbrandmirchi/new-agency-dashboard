@@ -4,6 +4,7 @@ import { useAgencyReportTabs } from '../hooks/useAgencyReportTabs';
 import { useAuth } from '../context/AuthContext';
 import { formatCurrency2, formatNumber, formatDec } from '../utils/format';
 import { DateRangePicker } from '../components/DatePicker';
+import { GoogleAdsLogo } from '../components/PlatformLogos';
 import Chart from 'chart.js/auto';
 
 const fU = (n) => '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -572,7 +573,7 @@ export function GoogleAdsPage() {
         <div className="page-title-bar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
           <div>
             <h2 style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, background: '#4285F4', color: 'white', borderRadius: 8, fontSize: 16, fontWeight: 700 }}>G</span>
+              <GoogleAdsLogo size={32} />
               Google Ads
             </h2>
             <p>Campaign performance across Search, PMax, Shopping, Display & more</p>

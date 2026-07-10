@@ -370,13 +370,14 @@ html, body { overflow-x: hidden; }
     justify-content: center;
     flex-shrink: 0;
     border-radius: 3px;
-    overflow: hidden;
 }
 
-.platform-logo svg {
+.platform-logo svg,
+.platform-logo img {
     width: 16px;
     height: 16px;
     display: block;
+    object-fit: contain;
 }
 
 .nav-icon { font-size: 14px; flex-shrink: 0; }

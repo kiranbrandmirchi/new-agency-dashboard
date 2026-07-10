@@ -1,4 +1,5 @@
 import React from 'react';
+import { GoogleAdsLogo, MetaAdsLogo } from './PlatformLogos';
 
 const fU = (n) => '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fI = (n) => Math.round(Number(n || 0)).toLocaleString('en-US');
@@ -139,7 +140,7 @@ export function ReportPreview({ report, accounts, sections, uploads, platformDat
       {gadsAccs.length > 0 && (
         <div className="rp-section">
           <div className="rp-section-header">
-            <div className="rp-section-icon" style={{ background: '#4285F4' }}>G</div>
+            <div className="rp-section-icon" style={{ background: 'transparent' }}><GoogleAdsLogo size={28} /></div>
             <h2>Google Ads</h2>
           </div>
           {gadsAccs.map((acc) => (
@@ -190,7 +191,7 @@ export function ReportPreview({ report, accounts, sections, uploads, platformDat
       {fbAccs.length > 0 && (
         <div className="rp-section">
           <div className="rp-section-header">
-            <div className="rp-section-icon" style={{ background: '#1877F2' }}>f</div>
+            <div className="rp-section-icon" style={{ background: 'transparent' }}><MetaAdsLogo size={28} /></div>
             <h2>Meta / Facebook Ads</h2>
           </div>
           {fbAccs.map((acc) => (
