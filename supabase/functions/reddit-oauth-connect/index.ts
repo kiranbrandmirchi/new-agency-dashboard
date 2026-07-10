@@ -17,11 +17,16 @@ Deno.serve(async (req)=>{
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY") || "";
     const supabase = createClient(supabaseUrl, serviceKey);
-    // ---- Authenticate caller ----
-    const authHeader = req.headers.get("Authorization") || "";
-    const token = authHeader.replace("Bearer ", "");
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    // ---- Authenticate caller (anon client forwards Authorization header) ----
+    const authHeader = req.headers.get("Authorization") || req.headers.get("authorization") || "";
+    const supabaseAuth = createClient(supabaseUrl, anonKey, {
+      global: {
+        headers: authHeader ? { Authorization: authHeader } : {}
+      }
+    });
+    const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
     if (authError || !user) {
       console.error("Auth error:", authError?.message);
       return new Response(JSON.stringify({
@@ -36,14 +41,17 @@ Deno.serve(async (req)=>{
       });
     }
     console.log("Authenticated user:", user.id, user.email);
-    // ---- Get agency from user_profiles ----
+    // ---- Parse request body (agency_id may be sent for super admins) ----
+    const body = await req.json().catch(() => ({}));
+    const { action, code } = body;
+    // ---- Resolve agency: request body (selected agency) or user profile ----
     const { data: profile, error: profileError } = await supabase.from("user_profiles").select("agency_id, role_id, is_super_admin").eq("id", user.id).single();
     console.log("Profile lookup:", JSON.stringify(profile), "Error:", profileError?.message);
-    if (profileError || !profile?.agency_id) {
+    if (profileError || !profile) {
       return new Response(JSON.stringify({
-        error: "User profile not found or no agency assigned",
+        error: "User profile not found",
         user_id: user.id,
-        detail: profileError?.message || "agency_id is null"
+        detail: profileError?.message
       }), {
         status: 404,
         headers: {
@@ -52,25 +60,46 @@ Deno.serve(async (req)=>{
         }
       });
     }
-    const agencyId = profile.agency_id;
+    const agencyId = body.agency_id || profile.agency_id;
+    if (!agencyId) {
+      return new Response(JSON.stringify({
+        error: "No agency associated with user.",
+        user_id: user.id,
+        detail: "agency_id is null"
+      }), {
+        status: 400,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      });
+    }
     console.log("Agency ID:", agencyId);
-    // ---- Parse request body ----
-    const body = await req.json();
-    const { action, code } = body;
     console.log("Action:", action);
+    if (!REDDIT_CLIENT_ID || !REDDIT_CLIENT_SECRET) {
+      return new Response(JSON.stringify({
+        error: "Reddit app credentials not configured",
+        detail: "Set REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET on the edge function."
+      }), {
+        status: 500,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      });
+    }
     // ================================================================
     // ACTION: get_auth_url
     // ================================================================
     if (action === "get_auth_url") {
-      // Dynamic redirect URI from request origin
-      const origin = req.headers.get("origin") || req.headers.get("referer")?.replace(/\/+$/, "") || "https://new-dashboard-whitelabel.vercel.app";
-      const redirectUri = `${origin}/oauth/callback`;
+      const origin = req.headers.get("origin") || req.headers.get("referer")?.replace(/\/+$/, "") || "";
+      const redirectUri = body.redirect_uri || `${origin}/oauth/callback` || "https://new-dashboard-whitelabel.vercel.app/oauth/callback";
       const stateObj = JSON.stringify({
         agency_id: agencyId,
         platform: "reddit",
         redirect_uri: redirectUri
       });
-      const authUrl = `https://www.reddit.com/api/v1/authorize` + `?client_id=${encodeURIComponent(REDDIT_CLIENT_ID)}` + `&response_type=code` + `&state=${encodeURIComponent(stateObj)}` + `&redirect_uri=${encodeURIComponent(redirectUri)}` + `&duration=permanent` + `&scope=adsread+identity`;
+      const authUrl = `https://www.reddit.com/api/v1/authorize` + `?client_id=${encodeURIComponent(REDDIT_CLIENT_ID)}` + `&response_type=code` + `&state=${encodeURIComponent(stateObj)}` + `&redirect_uri=${encodeURIComponent(redirectUri)}` + `&duration=permanent` + `&scope=adsread`;
       console.log("Auth URL generated, redirect_uri:", redirectUri);
       return new Response(JSON.stringify({
         url: authUrl

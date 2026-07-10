@@ -48,11 +48,13 @@ Deno.serve(async (req)=>{
         }
       });
     }
+    const body = await req.json().catch(()=>({}));
+    const { action } = body;
     const { data: profile, error: profileError } = await supabase.from("user_profiles").select("agency_id, role_id, is_super_admin").eq("id", user.id).single();
-    if (profileError || !profile?.agency_id) {
+    if (profileError || !profile) {
       return new Response(JSON.stringify({
-        error: "User profile not found or no agency assigned",
-        detail: profileError?.message || "agency_id is null"
+        error: "User profile not found",
+        detail: profileError?.message
       }), {
         status: 404,
         headers: {
@@ -61,9 +63,19 @@ Deno.serve(async (req)=>{
         }
       });
     }
-    const agencyId = profile.agency_id;
-    const body = await req.json().catch(()=>({}));
-    const { action } = body;
+    const agencyId = body.agency_id || profile.agency_id;
+    if (!agencyId) {
+      return new Response(JSON.stringify({
+        error: "No agency associated with user.",
+        detail: "agency_id is null"
+      }), {
+        status: 400,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      });
+    }
     if (!clientId || !clientSecret || !developerToken) {
       return new Response(JSON.stringify({
         error: "Bing app credentials not configured",

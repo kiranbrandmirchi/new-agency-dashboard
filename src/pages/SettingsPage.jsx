@@ -613,19 +613,18 @@ export function SettingsPage() {
     }
     setConnectingReddit(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { session } } = await supabase.auth.refreshSession();
       if (!session) {
         showNotification('Please sign in first.');
         return;
       }
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/reddit-oauth-connect`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-        body: JSON.stringify({ action: 'get_auth_url', redirect_uri: redirectUri, agency_id: effectiveAgencyId }),
+      const { data, error: fnError } = await supabase.functions.invoke('reddit-oauth-connect', {
+        body: { action: 'get_auth_url', redirect_uri: redirectUri, agency_id: effectiveAgencyId },
+        headers: { Authorization: `Bearer ${session.access_token}` },
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data?.error || data?.message || `Failed to connect Reddit (${res.status})`);
+      if (fnError) throw fnError;
+      if (data?.error) {
+        throw new Error([data.error, data.detail].filter(Boolean).join(' — '));
       }
       const url = data?.url || data?.auth_url;
       if (url) {
@@ -1546,6 +1545,11 @@ export function SettingsPage() {
                     </button>
                   )}
                 </div>
+                <p className="help-text" style={{ margin: '8px 0 0', maxWidth: 720 }}>
+                  In your Reddit developer app, set Redirect URI to this value exactly (scheme, host, path, no trailing slash):
+                  {' '}
+                  <code style={{ fontSize: 12, wordBreak: 'break-all' }}>{redirectUri}</code>
+                </p>
               </div>
               <AccountsTable
                 platform="reddit"
