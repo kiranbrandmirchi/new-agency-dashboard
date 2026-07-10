@@ -32,7 +32,7 @@ function resolveRedirectUri(body: Record<string, unknown>, req: Request): string
   } catch {
     // ignore bad referer
   }
-  return "https://new-dashboard-whitelabel.vercel.app/oauth/callback";
+  return "https://new-agency-dashboard.vercel.app/oauth/callback";
 }
 Deno.serve(async (req)=>{
   // ---- CORS preflight - must return 200 immediately ----
