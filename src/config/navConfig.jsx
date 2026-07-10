@@ -1,5 +1,5 @@
 import React from 'react';
-import { GoogleAdsLogo, MetaAdsLogo } from '../components/PlatformLogos';
+import { GoogleAdsLogo, MetaAdsLogo, RedditAdsLogo } from '../components/PlatformLogos';
 
 /**
  * Shared nav items for Sidebar and redirect logic.
@@ -31,7 +31,7 @@ export const NAV_ITEMS = [
   {
     id: 'reddit-ads', label: 'Reddit Ads', section: 'Ad Platforms',
     permission: 'sidebar.reddit_ads',
-    logo: <svg viewBox="0 0 24 24" width="16" height="16"><circle cx="12" cy="12" r="10" fill="#FF4500"/><path d="M16.67 13.38c.03.16.05.33.05.5 0 2.56-2.98 4.63-6.67 4.63-3.69 0-6.67-2.07-6.67-4.63 0-.17.02-.34.05-.5a1.5 1.5 0 01-.6-1.2 1.52 1.52 0 012.75-.88c1.2-.81 2.84-1.33 4.63-1.4l.87-4.1a.3.3 0 01.36-.24l2.9.62a1.07 1.07 0 112.02.18l-2.7-.58-.78 3.7c1.77.07 3.38.59 4.57 1.4a1.52 1.52 0 012.75.88c0 .47-.22.9-.57 1.18zM8.17 13.38a1.25 1.25 0 100 2.5 1.25 1.25 0 000-2.5zm5.92 2.5a1.25 1.25 0 100-2.5 1.25 1.25 0 000 2.5zm-.4 1.46c-.96.72-2.2 1.03-3.6 1.03-1.4 0-2.64-.31-3.6-1.03a.3.3 0 01.4-.44c.81.6 1.88.91 3.2.91s2.39-.31 3.2-.91a.3.3 0 01.4.44z" fill="#fff"/></svg>,
+    logo: <RedditAdsLogo size={18} />,
   },
   {
     id: 'dsp', label: 'DSP (TTD / DV360)', section: 'Programmatic & CTV',

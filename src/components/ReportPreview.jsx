@@ -1,5 +1,5 @@
 import React from 'react';
-import { GoogleAdsLogo, MetaAdsLogo } from './PlatformLogos';
+import { GoogleAdsLogo, MetaAdsLogo, RedditAdsLogo } from './PlatformLogos';
 
 const fU = (n) => '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fI = (n) => Math.round(Number(n || 0)).toLocaleString('en-US');
@@ -234,7 +234,7 @@ export function ReportPreview({ report, accounts, sections, uploads, platformDat
       {redditAccs.length > 0 && (
         <div className="rp-section">
           <div className="rp-section-header">
-            <div className="rp-section-icon" style={{ background: '#FF4500' }}>R</div>
+            <div className="rp-section-icon" style={{ background: 'transparent' }}><RedditAdsLogo size={28} /></div>
             <h2>Reddit Ads</h2>
           </div>
           {redditAccs.map((acc) => (

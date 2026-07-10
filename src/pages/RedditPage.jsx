@@ -3,6 +3,7 @@ import { useRedditData } from '../hooks/useRedditData';
 import { useAuth } from '../context/AuthContext';
 import { formatCurrency2, formatNumber, formatPercent } from '../utils/format';
 import { DateRangePicker } from '../components/DatePicker';
+import { RedditAdsLogo } from '../components/PlatformLogos';
 import Chart from 'chart.js/auto';
 
 const fU = (n) => '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -230,7 +231,7 @@ export function RedditPage() {
         <div className="page-title-bar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
           <div>
             <h2 style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, background: '#FF4500', color: 'white', borderRadius: 8, fontSize: 16, fontWeight: 700 }}>R</span>
+              <RedditAdsLogo size={32} />
               Reddit Ads
             </h2>
             <p>Campaign performance across Reddit Ads</p>

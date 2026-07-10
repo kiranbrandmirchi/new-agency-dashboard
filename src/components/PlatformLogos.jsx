@@ -56,3 +56,40 @@ export function MetaAdsLogo({ size = 16, className, style }) {
     </svg>
   );
 }
+
+/** Reddit Snoo mark (orange speech bubble). */
+export function RedditAdsLogo({ size = 16, className, style }) {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      width={size}
+      height={size}
+      className={className}
+      style={style}
+      aria-hidden
+    >
+      <circle cx="10" cy="10" r="9" fill="#FF4500" />
+      <path fill="#FF4500" d="M4.5 14.2 2.2 18.2 6.8 15.1Z" />
+      <ellipse cx="10" cy="11.2" rx="5.4" ry="4.7" fill="#fff" />
+      <circle cx="5.3" cy="9.6" r="1.7" fill="#fff" />
+      <circle cx="14.7" cy="9.6" r="1.7" fill="#fff" />
+      <circle cx="7.9" cy="10.6" r="1.25" fill="#FF4500" />
+      <circle cx="12.1" cy="10.6" r="1.25" fill="#FF4500" />
+      <path
+        d="M7.6 13 Q10 14.3 12.4 13"
+        stroke="#1a1a1a"
+        strokeWidth="0.75"
+        fill="none"
+        strokeLinecap="round"
+      />
+      <path
+        d="M10 6.6 Q10.9 4.2 11.9 3.3"
+        stroke="#1a1a1a"
+        strokeWidth="0.75"
+        fill="none"
+        strokeLinecap="round"
+      />
+      <circle cx="12" cy="3.2" r="1.05" fill="#fff" stroke="#1a1a1a" strokeWidth="0.45" />
+    </svg>
+  );
+}
