@@ -6,10 +6,10 @@ export const reportData = {
   client: 'Neulife Rehabilitation',
   location: 'Florida',
   month: 'April 2026',
-  preparedBy: 'Red Castle Services',
-  website: 'redcastleservices.com',
+  preparedBy: 'Chipper Digital',
+  website: 'chipperdigital.io',
   /** Cover slide logo (public/) — used in preview, PDF, and PPTX */
-  coverLogoUrl: '/rc-logo.png',
+  coverLogoUrl: '/brand-logo.png',
 
   services: [
     {

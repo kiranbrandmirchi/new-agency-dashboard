@@ -92,7 +92,7 @@ function EditableText({ value, onChange, className, multiline, disabled, as = 'd
 function Footer({ monthLabel }) {
   return (
     <div className="mr-slide-red-bar mr-slide-red-bar--footer">
-      <span className="mr-slide-footer-brand">RED CASTLE SERVICES</span>
+      <span className="mr-slide-footer-brand">CHIPPER DIGITAL</span>
       <span className="mr-slide-footer-sep">|</span>
       <span className="mr-slide-footer-title">SEO &amp; DIGITAL MARKETING REPORT</span>
       <span className="mr-slide-footer-sep">|</span>
@@ -124,14 +124,14 @@ function NotesBox({ title = 'Notes', children }) {
 }
 
 function Slide1({ clientName, monthLabel, agency, coverLogoUrl }) {
-  const preparedBy = agency?.agency_name || 'Red Castle Services';
-  const website = (agency?.website_url || 'redcastleservices.com').replace(/^https?:\/\//, '');
+  const preparedBy = agency?.agency_name || 'Chipper Digital';
+  const website = (agency?.website_url || 'chipperdigital.io').replace(/^https?:\/\//, '');
   const logoSrc = useLogoForDarkBackground(coverLogoUrl || DEFAULT_COVER_LOGO_URL);
   return (
     <div className="mr-slide-inner mr-slide-cover">
       <div className="mr-slide-cover-left">
         <div className="mr-slide-cover-left-inner">
-          <div className="mr-slide-cover-brand">RED CASTLE SERVICES</div>
+          <div className="mr-slide-cover-brand">CHIPPER DIGITAL</div>
           <div className="mr-slide-cover-rule" />
           <div className="mr-slide-cover-month">{monthLabel}</div>
         </div>
@@ -139,7 +139,7 @@ function Slide1({ clientName, monthLabel, agency, coverLogoUrl }) {
       </div>
       <div className="mr-slide-cover-right">
         <div className="mr-slide-cover-logo">
-          <img src={logoSrc} alt="Red Castle Services" className="mr-slide-cover-logo-img" />
+          <img src={logoSrc} alt="Chipper Digital" className="mr-slide-cover-logo-img" />
         </div>
         <h2 className="mr-slide-cover-title">SEO &amp; DIGITAL<br />MARKETING<br />UPDATES</h2>
         <p className="mr-slide-cover-client">{clientName}</p>
@@ -799,7 +799,7 @@ export function MonthlySlideGrid({
     <section className="mr-slide-preview-section">
       <div className="mr-slide-preview-header">
         <h3>{clientName} — {monthLabel} Slide Report</h3>
-        <p>Red Castle branded slides with live Supabase data</p>
+        <p>Chipper Digital branded slides with live Supabase data</p>
       </div>
       {grid}
     </section>

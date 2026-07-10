@@ -87,7 +87,7 @@ function redHeader(slide: PptxSlide, title: string, right?: string) {
 
 function redFooter(slide: PptxSlide, month: string) {
   slide.addShape('rect', { x: 0, y: FOOTER_Y, w: 10, h: FOOTER_H, fill: { color: C.redBar } });
-  slide.addText(`Red Castle Services | SEO & Digital Marketing Report | ${month}`, {
+  slide.addText(`Chipper Digital | SEO & Digital Marketing Report | ${month}`, {
     x: 0.2,
     y: FOOTER_Y + 0.05,
     w: 9.6,
@@ -244,7 +244,7 @@ function addCoverSlide(pptx: PptxGenJS, data: ReportData, logoDataUrl: string | 
       h: COVER_LOGO_SIZE,
     });
   }
-  slide.addText('RED CASTLE\nSERVICES', {
+  slide.addText('CHIPPER\nDIGITAL', {
     x: SLIDE_W_IN - 1.1,
     y: COVER_LOGO_Y,
     w: 1.05,
@@ -744,7 +744,7 @@ export async function generatePptx(data: ReportData, options: GeneratePptxOption
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_16x9';
 
-  const logoDataUrl = await loadImageDataUrl(data.coverLogoUrl ?? '/rc-logo.png');
+  const logoDataUrl = await loadImageDataUrl(data.coverLogoUrl ?? '/brand-logo.png');
 
   addCoverSlide(pptx, data, logoDataUrl);
   addContentSlide2(pptx, data);

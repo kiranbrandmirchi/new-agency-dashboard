@@ -41,7 +41,7 @@ export function Signup() {
     return (
       <div className="auth-page">
         <div className="auth-card">
-          <img src="/rc-logo-full.png" alt="Red Castle Services" className="auth-logo" />
+          <img src="/brand-logo.png" alt="Chipper Digital" className="auth-logo" />
           <h1 className="auth-title">Check your email</h1>
           <p className="auth-subtitle signup-success">
             We&apos;ve sent a confirmation link to <strong>{email}</strong>. Click it to verify your account, then sign in.
@@ -57,7 +57,7 @@ export function Signup() {
   return (
     <div className="auth-page">
       <div className="auth-card">
-        <img src="/rc-logo-full.png" alt="Red Castle Services" className="auth-logo" />
+        <img src="/brand-logo.png" alt="Chipper Digital" className="auth-logo" />
         <h1 className="auth-title">Create Account</h1>
         <p className="auth-subtitle">Create your reporting dashboard account</p>
         <form className="auth-form" onSubmit={handleSubmit}>

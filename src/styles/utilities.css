@@ -175,7 +175,7 @@ textarea::placeholder {
     opacity: 1;
 }
 
-/* Red Castle brand accent bar for panels */
+/* Chipper Digital brand accent bar for panels */
 .panel-accent-red { border-top: 3px solid var(--primary); }
 .panel-accent-navy { border-top: 3px solid var(--navy); }
 .panel-accent-accent { border-top: 3px solid var(--accent); }

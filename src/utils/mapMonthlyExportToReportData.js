@@ -47,9 +47,9 @@ export function mapMonthlyExportToReportData(monthly) {
     client: monthly.client || 'Client',
     location: row.location || monthly.client,
     month: monthly.month || cur,
-    preparedBy: monthly.preparedBy || 'Red Castle Services',
-    website: monthly.website || 'redcastleservices.com',
-    coverLogoUrl: monthly.coverLogoUrl || '/rc-logo.png',
+    preparedBy: monthly.preparedBy || 'Chipper Digital',
+    website: monthly.website || 'chipperdigital.io',
+    coverLogoUrl: monthly.coverLogoUrl || '/brand-logo.png',
     services: Array.isArray(monthly.services) ? monthly.services : [],
     leadSummary: {
       tableRow: {

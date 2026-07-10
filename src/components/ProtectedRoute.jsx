@@ -20,7 +20,7 @@ export function ProtectedRoute({ children }) {
     return (
       <div className="auth-page">
         <div className="auth-card">
-          <img src="/rc-logo-full.png" alt="Red Castle Services" className="auth-logo" />
+          <img src="/brand-logo.png" alt="Chipper Digital" className="auth-logo" />
           <h1 className="auth-title">Account Issue</h1>
           <p className="auth-subtitle auth-error-msg">{authError}</p>
           <button

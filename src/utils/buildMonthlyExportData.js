@@ -106,8 +106,8 @@ export function buildMonthlyExportData({
   const cmpOn = compareOn !== undefined
     ? !!compareOn
     : (slideData?.compareOn !== undefined ? !!slideData.compareOn : true);
-  const preparedBy = agency?.agency_name || 'Red Castle Services';
-  const website = (agency?.website_url || 'redcastleservices.com').replace(/^https?:\/\//, '');
+  const preparedBy = agency?.agency_name || 'Chipper Digital';
+  const website = (agency?.website_url || 'chipperdigital.io').replace(/^https?:\/\//, '');
 
   const servicesRaw = parseSectionJson(sections, 'slide2_services', DEFAULT_SLIDE2_SERVICES);
   const services = getEnabledSlide2Services(servicesRaw);

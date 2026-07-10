@@ -11,11 +11,11 @@ const STORAGE_KEYS = {
   dangerColor: 'dangerColor',
 };
 
-const BRAND_VERSION = 'redcastle-v1';
+const BRAND_VERSION = 'chipper-v1';
 
 const DEFAULTS = {
-  agencyName: 'Red Castle',
-  agencyLogo: 'SERVICES',
+  agencyName: 'Chipper',
+  agencyLogo: 'Digital',
   primary: '#E12627',
   accent: '#0083CB',
   warning: '#F5A623',

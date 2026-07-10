@@ -39,7 +39,7 @@ function EditableText({ value, onChange, className }) {
 }
 
 const FOOTER_TEXT = (month) =>
-  `Red Castle Services | SEO & Digital Marketing Report | ${month}`;
+  `Chipper Digital | SEO & Digital Marketing Report | ${month}`;
 
 function RedHeader({ title, right }) {
   return (
@@ -107,8 +107,8 @@ function CoverSlide() {
             <img src={report.coverLogoUrl} alt="" />
           </div>
           <div className="ppt-cover-logo-text">
-            RED CASTLE
-            <span>SERVICES</span>
+            CHIPPER
+            <span>DIGITAL</span>
           </div>
         </div>
         <h2 className="ppt-cover-title">

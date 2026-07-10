@@ -179,7 +179,7 @@ function redHeader(slide: PptxSlide, title: string, right?: string) {
 function redFooter(slide: PptxSlide, month: string) {
   slide.addShape('rect', { x: 0, y: FOOTER_Y, w: 10, h: FOOTER_H, fill: { color: C.redBar } });
   slide.addText([
-    { text: 'RED CASTLE SERVICES', options: { bold: true, fontSize: 9 } },
+    { text: 'CHIPPER DIGITAL', options: { bold: true, fontSize: 9 } },
     { text: ' | SEO & DIGITAL MARKETING REPORT | ', options: { fontSize: 8 } },
     { text: month, options: { fontSize: 8 } },
   ], { x: 0.2, y: FOOTER_Y + 0.05, w: 9.6, h: 0.2, color: C.white, valign: 'middle' });
@@ -289,7 +289,7 @@ function addCoverSlide(pptx: PptxGenJS, data: MonthlyExportData, logoDataUrl: st
 
   // Left column — brand block vertically centered
   const leftBrandY = SLIDE_H * 0.38;
-  slide.addText('RED CASTLE SERVICES', {
+  slide.addText('CHIPPER DIGITAL', {
     x: leftPad,
     y: leftBrandY,
     w: COVER_LEFT_W_IN - leftPad * 2,
@@ -990,7 +990,7 @@ export async function buildEditableMonthlyPptx(
   const PptxCtor = (PptxGenJS as unknown as { default?: typeof PptxGenJS }).default ?? PptxGenJS;
   const pptx = new PptxCtor();
   pptx.layout = 'LAYOUT_16x9';
-  pptx.author = 'Red Castle Services';
+  pptx.author = 'Chipper Digital';
   pptx.title = `${options.clientName} — ${options.monthLabel}`;
 
   const logoDataUrl = await loadLogoForDarkBackground(data.coverLogoUrl ?? DEFAULT_COVER_LOGO_URL);

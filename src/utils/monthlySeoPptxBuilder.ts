@@ -36,7 +36,7 @@ function redHeader(slide: PptxSlide, title: string, right?: string) {
 function redFooter(slide: PptxSlide, month: string) {
   slide.addShape('rect', { x: 0, y: FOOTER_Y, w: 10, h: FOOTER_H, fill: { color: C.redBar } });
   slide.addText([
-    { text: 'RED CASTLE SERVICES', options: { bold: true, fontSize: 10 } },
+    { text: 'CHIPPER DIGITAL', options: { bold: true, fontSize: 10 } },
     { text: ' | SEO & DIGITAL MARKETING REPORT | ', options: { fontSize: 9 } },
     { text: month, options: { fontSize: 9 } },
   ], { x: 0.2, y: FOOTER_Y + 0.04, w: 9.6, h: 0.2, color: C.white, valign: 'middle' });
@@ -1064,6 +1064,6 @@ export function addSeoSlidesToPptx(pptx: PptxGenJS, data: Record<string, unknown
     const slide = pptx.addSlide();
     slide.background = { color: C.sectionMaroon };
     slide.addText('Thank You!', { x: 0.5, y: 1.6, w: 9, h: 0.8, fontSize: 36, bold: true, color: C.white, align: 'center' });
-    slide.addText(`Client: ${client}\nPeriod: ${periodLabel}\nPrepared by: Red Castle Services`, { x: 0.5, y: 2.6, w: 9, h: 1.5, fontSize: 12, color: C.white, align: 'center' });
+    slide.addText(`Client: ${client}\nPeriod: ${periodLabel}\nPrepared by: Chipper Digital`, { x: 0.5, y: 2.6, w: 9, h: 1.5, fontSize: 12, color: C.white, align: 'center' });
   }
 }
