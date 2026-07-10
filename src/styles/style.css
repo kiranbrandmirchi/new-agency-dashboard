@@ -260,7 +260,7 @@ html, body { overflow-x: hidden; }
     max-width: 170px;
     height: auto;
     border-radius: var(--radius-sm);
-    background: #fff;
+    /* background: #fff; */
     padding: 6px 10px;
 }
 
