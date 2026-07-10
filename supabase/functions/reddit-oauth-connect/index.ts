@@ -21,9 +21,9 @@ function normalizeRedirectUri(uri: string): string {
 }
 
 function resolveRedirectUri(body: Record<string, unknown>, req: Request): string {
-  if (REDDIT_REDIRECT_URI) return normalizeRedirectUri(REDDIT_REDIRECT_URI);
   const bodyUri = typeof body.redirect_uri === "string" ? body.redirect_uri.trim() : "";
   if (bodyUri) return normalizeRedirectUri(bodyUri);
+  if (REDDIT_REDIRECT_URI) return normalizeRedirectUri(REDDIT_REDIRECT_URI);
   const originHeader = req.headers.get("origin")?.trim();
   if (originHeader) return normalizeRedirectUri(`${originHeader}/oauth/callback`);
   try {
