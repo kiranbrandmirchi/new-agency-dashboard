@@ -123,19 +123,22 @@ export function OAuthCallback() {
     let cancelled = false;
     (async () => {
       try {
-        const { data, error: fnError } = await supabase.functions.invoke('reddit-oauth-connect', {
-          body: {
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/reddit-oauth-connect`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({
             action: 'exchange_code',
             code: authCode,
             redirect_uri: redirectUri,
             state: stateParam || undefined,
             agency_id: effectiveAgencyId,
-          },
-          headers: { Authorization: `Bearer ${session.access_token}` },
+          }),
         });
+        const data = await res.json().catch(() => ({}));
         if (cancelled) return;
-        if (fnError) throw fnError;
-        if (data?.error) throw new Error(data.error);
+        if (!res.ok || data?.error) {
+          throw new Error([data?.error, data?.detail].filter(Boolean).join(' — ') || `Failed to connect Reddit (${res.status})`);
+        }
         showNotification?.('Reddit Ads connected successfully');
         showPage?.('settings');
         navigate('/');

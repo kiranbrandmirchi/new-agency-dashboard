@@ -122,6 +122,7 @@ export function SettingsPage() {
   const [savingAgency, setSavingAgency] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [connectingReddit, setConnectingReddit] = useState(false);
+  const [redditConnected, setRedditConnected] = useState(false);
   const [connectingTiktok, setConnectingTiktok] = useState(false);
   const [tiktokPasteInput, setTiktokPasteInput] = useState('');
   const [tiktokPastingCode, setTiktokPastingCode] = useState(false);
@@ -187,6 +188,26 @@ export function SettingsPage() {
     return getDateRangeFromPreset(ga4DatePreset) || getDateRangeFromPreset('last7');
   }, [ga4DatePreset, ga4CustomFrom, ga4CustomTo]);
 
+  const fetchRedditConnectionStatus = useCallback(async () => {
+    if (!effectiveAgencyId) {
+      setRedditConnected(false);
+      return;
+    }
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/reddit-oauth-connect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ action: 'connection_status', agency_id: effectiveAgencyId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) setRedditConnected(!!data?.connected);
+    } catch (err) {
+      console.warn('[Settings] reddit connection status error:', err);
+    }
+  }, [effectiveAgencyId]);
+
   const fetchCredentials = useCallback(async () => {
     if (!effectiveAgencyId) {
       setLoadingCreds(false);
@@ -249,6 +270,7 @@ export function SettingsPage() {
   }, [syncLogs, lastDayByAccount]);
 
   useEffect(() => { fetchCredentials(); }, [fetchCredentials]);
+  useEffect(() => { fetchRedditConnectionStatus(); }, [fetchRedditConnectionStatus]);
   useEffect(() => { fetchAccounts(); }, [fetchAccounts]);
 
   const fetchLastDayPerAccount = useCallback(async (platform, customerIds) => {
@@ -802,6 +824,7 @@ export function SettingsPage() {
       if (error) throw error;
       if (platform === 'google_ads' && !data?.success && data?.error) throw new Error(data.error);
       await fetchCredentials();
+      if (platform === 'reddit') await fetchRedditConnectionStatus();
       showNotification('Disconnected');
     } catch (err) {
       showNotification(err?.message || 'Failed to disconnect');
@@ -1277,6 +1300,7 @@ export function SettingsPage() {
 
   const gadsCred = credentials.find((c) => c.platform === 'google_ads' && c.is_active);
   const redditCred = credentials.find((c) => c.platform === 'reddit' && c.is_active);
+  const redditIsConnected = redditConnected || !!redditCred;
   const tiktokCred = credentials.find((c) => c.platform === 'tiktok' && c.is_active);
   const bingCred = credentials.find((c) => c.platform === 'bing' && c.is_active);
   const facebookCred = credentials.find((c) => c.platform === 'facebook' && c.is_active);
@@ -1541,9 +1565,9 @@ export function SettingsPage() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span style={{ fontWeight: 600 }}>Reddit Ads</span>
-                    <span className={`badge ${redditCred ? 'badge-green' : 'badge-gray'}`}>{redditCred ? 'Connected' : 'Not connected'}</span>
+                    <span className={`badge ${redditIsConnected ? 'badge-green' : 'badge-gray'}`}>{redditIsConnected ? 'Connected' : 'Not connected'}</span>
                   </div>
-                  {redditCred ? (
+                  {redditIsConnected ? (
                     <button type="button" className="btn btn-outline btn-sm" onClick={() => handleDisconnect('reddit')} disabled={disconnecting === 'reddit'}>
                       {disconnecting === 'reddit' ? 'Disconnecting…' : 'Disconnect'}
                     </button>
@@ -1553,6 +1577,11 @@ export function SettingsPage() {
                     </button>
                   )}
                 </div>
+                {!redditIsConnected && activeRedditAccounts.length > 0 && (
+                  <p className="help-text" style={{ margin: '8px 0 0', maxWidth: 720, color: 'var(--warning, #b45309)' }}>
+                    Accounts are listed but Reddit OAuth is disconnected. Click Connect to re-authorize syncing.
+                  </p>
+                )}
                 <p className="help-text" style={{ margin: '8px 0 0', maxWidth: 720 }}>
                   In your Reddit developer app, set Redirect URI to this value exactly (scheme, host, path, no trailing slash):
                   {' '}

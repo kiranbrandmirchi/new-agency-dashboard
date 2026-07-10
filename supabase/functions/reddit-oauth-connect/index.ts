@@ -193,23 +193,77 @@ Deno.serve(async (req)=>{
           }
         });
       }
-      // Step 2: Save credentials
-      const { error: credError } = await supabase.from("agency_platform_credentials").upsert({
-        agency_id: agencyId,
-        platform: "reddit",
+      if (!tokenData.refresh_token) {
+        return new Response(JSON.stringify({
+          error: "Reddit token exchange failed",
+          detail: "No refresh token returned. Try disconnecting and reconnecting with duration=permanent."
+        }), {
+          status: 400,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json"
+          }
+        });
+      }
+      // Step 2: Save credentials (select/update/insert — upsert fails on partial unique index)
+      const { data: existingCredRows, error: credSelError } = await supabase.from("agency_platform_credentials").select("id").eq("agency_id", agencyId).eq("platform", "reddit").limit(1);
+      if (credSelError) {
+        console.error("Credential lookup error:", credSelError.message);
+        return new Response(JSON.stringify({
+          error: "Failed to save Reddit credentials",
+          detail: credSelError.message
+        }), {
+          status: 500,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json"
+          }
+        });
+      }
+      const tokenFields = {
         oauth_refresh_token: tokenData.refresh_token,
         is_active: true,
         connected_by: user.id,
         connected_at: new Date().toISOString(),
-        token_scopes: tokenData.scope || "adsread identity"
-      }, {
-        onConflict: "agency_id,platform"
-      });
-      if (credError) {
-        console.error("Credential save error:", credError.message);
+        token_scopes: tokenData.scope || "adsread"
+      };
+      const existingCredId = existingCredRows?.[0]?.id;
+      if (existingCredId) {
+        const { error: credError } = await supabase.from("agency_platform_credentials").update(tokenFields).eq("id", existingCredId);
+        if (credError) {
+          console.error("Credential save error:", credError.message);
+          return new Response(JSON.stringify({
+            error: "Failed to save Reddit credentials",
+            detail: credError.message
+          }), {
+            status: 500,
+            headers: {
+              ...corsHeaders,
+              "Content-Type": "application/json"
+            }
+          });
+        }
       } else {
-        console.log("Credentials saved successfully");
+        const { error: credError } = await supabase.from("agency_platform_credentials").insert({
+          agency_id: agencyId,
+          platform: "reddit",
+          ...tokenFields
+        });
+        if (credError) {
+          console.error("Credential save error:", credError.message);
+          return new Response(JSON.stringify({
+            error: "Failed to save Reddit credentials",
+            detail: credError.message
+          }), {
+            status: 500,
+            headers: {
+              ...corsHeaders,
+              "Content-Type": "application/json"
+            }
+          });
+        }
       }
+      console.log("Credentials saved successfully");
       // Step 3: Discover ad accounts
       const accessToken = tokenData.access_token;
       let discoveredAccounts = [];
@@ -348,6 +402,33 @@ Deno.serve(async (req)=>{
         success: true,
         accounts: discoveredAccounts,
         message: `Found ${discoveredAccounts.length} account(s)`
+      }), {
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      });
+    }
+    // ================================================================
+    // ACTION: connection_status
+    // ================================================================
+    if (action === "connection_status") {
+      const { data: credRow, error: statusError } = await supabase.from("agency_platform_credentials").select("is_active, connected_at").eq("agency_id", agencyId).eq("platform", "reddit").maybeSingle();
+      if (statusError) {
+        return new Response(JSON.stringify({
+          error: "Failed to check Reddit connection",
+          detail: statusError.message
+        }), {
+          status: 500,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json"
+          }
+        });
+      }
+      return new Response(JSON.stringify({
+        connected: !!credRow?.is_active,
+        connected_at: credRow?.connected_at || null
       }), {
         headers: {
           ...corsHeaders,
