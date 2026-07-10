@@ -6,7 +6,34 @@ const corsHeaders = {
 };
 const REDDIT_CLIENT_ID = Deno.env.get("REDDIT_CLIENT_ID") || "";
 const REDDIT_CLIENT_SECRET = Deno.env.get("REDDIT_CLIENT_SECRET") || "";
+const REDDIT_REDIRECT_URI = (Deno.env.get("REDDIT_REDIRECT_URI") || "").trim();
 const USER_AGENT = "AgencyDashboard/1.0";
+
+function normalizeRedirectUri(uri: string): string {
+  const trimmed = uri.trim();
+  try {
+    const u = new URL(trimmed);
+    const path = u.pathname.replace(/\/+$/, "") || "";
+    return `${u.origin}${path}${u.search}`;
+  } catch {
+    return trimmed.replace(/\/+$/, "");
+  }
+}
+
+function resolveRedirectUri(body: Record<string, unknown>, req: Request): string {
+  if (REDDIT_REDIRECT_URI) return normalizeRedirectUri(REDDIT_REDIRECT_URI);
+  const bodyUri = typeof body.redirect_uri === "string" ? body.redirect_uri.trim() : "";
+  if (bodyUri) return normalizeRedirectUri(bodyUri);
+  const originHeader = req.headers.get("origin")?.trim();
+  if (originHeader) return normalizeRedirectUri(`${originHeader}/oauth/callback`);
+  try {
+    const referer = req.headers.get("referer");
+    if (referer) return normalizeRedirectUri(`${new URL(referer).origin}/oauth/callback`);
+  } catch {
+    // ignore bad referer
+  }
+  return "https://new-dashboard-whitelabel.vercel.app/oauth/callback";
+}
 Deno.serve(async (req)=>{
   // ---- CORS preflight - must return 200 immediately ----
   if (req.method === "OPTIONS") {
@@ -92,8 +119,7 @@ Deno.serve(async (req)=>{
     // ACTION: get_auth_url
     // ================================================================
     if (action === "get_auth_url") {
-      const origin = req.headers.get("origin") || req.headers.get("referer")?.replace(/\/+$/, "") || "";
-      const redirectUri = body.redirect_uri || `${origin}/oauth/callback` || "https://new-dashboard-whitelabel.vercel.app/oauth/callback";
+      const redirectUri = resolveRedirectUri(body, req);
       const stateObj = JSON.stringify({
         agency_id: agencyId,
         platform: "reddit",
@@ -102,7 +128,8 @@ Deno.serve(async (req)=>{
       const authUrl = `https://www.reddit.com/api/v1/authorize` + `?client_id=${encodeURIComponent(REDDIT_CLIENT_ID)}` + `&response_type=code` + `&state=${encodeURIComponent(stateObj)}` + `&redirect_uri=${encodeURIComponent(redirectUri)}` + `&duration=permanent` + `&scope=adsread`;
       console.log("Auth URL generated, redirect_uri:", redirectUri);
       return new Response(JSON.stringify({
-        url: authUrl
+        url: authUrl,
+        redirect_uri: redirectUri
       }), {
         headers: {
           ...corsHeaders,
@@ -126,18 +153,16 @@ Deno.serve(async (req)=>{
         });
       }
       // Determine redirect_uri - must match what was used in get_auth_url
-      let redirectUri = "https://new-dashboard-whitelabel.vercel.app/oauth/callback";
+      let redirectUri = resolveRedirectUri(body, req);
       // Try to get it from state (passed back by Reddit)
       if (body.state) {
         try {
           const stateObj = typeof body.state === "string" ? JSON.parse(body.state) : body.state;
-          if (stateObj.redirect_uri) redirectUri = stateObj.redirect_uri;
+          if (stateObj.redirect_uri) redirectUri = normalizeRedirectUri(stateObj.redirect_uri);
         } catch (e) {
-          console.log("Could not parse state, using default redirect_uri");
+          console.log("Could not parse state, using resolved redirect_uri");
         }
       }
-      // Accept explicit redirect_uri from body as override
-      if (body.redirect_uri) redirectUri = body.redirect_uri;
       console.log("Exchanging code, redirect_uri:", redirectUri);
       // Step 1: Exchange authorization code for tokens
       const tokenResp = await fetch("https://www.reddit.com/api/v1/access_token", {

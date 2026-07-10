@@ -618,11 +618,19 @@ export function SettingsPage() {
         showNotification('Please sign in first.');
         return;
       }
-      const { data, error: fnError } = await supabase.functions.invoke('reddit-oauth-connect', {
-        body: { action: 'get_auth_url', redirect_uri: redirectUri, agency_id: effectiveAgencyId },
-        headers: { Authorization: `Bearer ${session.access_token}` },
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/reddit-oauth-connect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({
+          action: 'get_auth_url',
+          redirect_uri: redirectUri,
+          agency_id: effectiveAgencyId,
+        }),
       });
-      if (fnError) throw fnError;
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error([data?.error, data?.detail].filter(Boolean).join(' — ') || `Failed to connect Reddit (${res.status})`);
+      }
       if (data?.error) {
         throw new Error([data.error, data.detail].filter(Boolean).join(' — '));
       }

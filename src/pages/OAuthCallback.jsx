@@ -128,6 +128,7 @@ export function OAuthCallback() {
             action: 'exchange_code',
             code: authCode,
             redirect_uri: redirectUri,
+            state: stateParam || undefined,
             agency_id: effectiveAgencyId,
           },
           headers: { Authorization: `Bearer ${session.access_token}` },
@@ -146,7 +147,7 @@ export function OAuthCallback() {
       }
     })();
     return () => { cancelled = true; };
-  }, [step, authCode, session, effectiveAgencyId, redirectUri, navigate, showNotification, showPage]);
+  }, [step, authCode, session, effectiveAgencyId, redirectUri, stateParam, navigate, showNotification, showPage]);
 
   useEffect(() => {
     if (step !== 'tiktok_exchange' || !authCode || !session || !effectiveAgencyId) return;
