@@ -7,12 +7,13 @@
  * Flow: refresh access token → SubmitGenerateReport (SOAP) → PollGenerateReport
  * (SOAP) → download CSV → upsert. One sync call submits the six standard reports
  * for a single advertiser account.
- */ const corsHeaders = {
+ */ import { unzipSync } from "npm:fflate@0.8.2";
+const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS"
 };
-const REPORTING_URL = "https://reporting.api.bingads.microsoft.com/Reporting/v13/ReportingService.svc";
+const REPORTING_URL = "https://reporting.api.bingads.microsoft.com/Api/Advertiser/Reporting/v13/ReportingService.svc";
 const SOAP_NS = "https://bingads.microsoft.com/Reporting/v13";
 function jsonRes(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -44,6 +45,39 @@ function getFaultMessage(xml) {
   const fault = getTag(xml, "faultstring") || getTag(xml, "Message");
   return fault ? fault.trim() : null;
 }
+function getDownloadUrl(xml) {
+  const re = /<(?:[A-Za-z0-9_]+:)?ReportDownloadUrl\b([^/>]*)\/?>(?:([\s\S]*?)<\/(?:[A-Za-z0-9_]+:)?ReportDownloadUrl>)?/i;
+  const m = xml.match(re);
+  if (!m) return null;
+  if (/\bi:nil\s*=\s*["']true["']/i.test(m[1] || "")) return null;
+  const url = (m[2] || "").trim();
+  if (!url) return null;
+  return url.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"');
+}
+function reportDateFromRow(r) {
+  const raw = r.GregorianDate || r.TimePeriod || "";
+  if (!raw) return null;
+  // TimePeriod daily values look like 6/1/2026 or 2026-06-01 depending on locale.
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const us = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (us) {
+    const mm = us[1].padStart(2, "0");
+    const dd = us[2].padStart(2, "0");
+    return `${us[3]}-${mm}-${dd}`;
+  }
+  return raw.slice(0, 10);
+}
+function extractReportText(buf) {
+  const u8 = new Uint8Array(buf);
+  if (u8[0] === 0x50 && u8[1] === 0x4b) {
+    const entries = unzipSync(u8);
+    const name = Object.keys(entries).find((k)=>/\.csv$/i.test(k));
+    if (!name) throw new Error("ZIP report contained no CSV file");
+    return new TextDecoder("utf-8").decode(entries[name]);
+  }
+  return new TextDecoder("utf-8").decode(u8);
+}
 function parseCsv(text) {
   // Microsoft reports include report metadata lines before the actual data table; the
   // real header row starts at "GregorianDate" (or whichever time column we requested).
@@ -51,7 +85,7 @@ function parseCsv(text) {
   const lines = text.split(/\r?\n/);
   let headerIdx = -1;
   for(let i = 0; i < lines.length; i++){
-    if (/^"?GregorianDate"?,/i.test(lines[i])) {
+    if (/^"?(GregorianDate|TimePeriod)"?,/i.test(lines[i])) {
       headerIdx = i;
       break;
     }
@@ -110,7 +144,8 @@ const REPORTS = [
   {
     key: "campaign",
     reportName: "CampaignPerformanceReportRequest",
-    scopeXml: (id)=>`<Scope><AccountIds xmlns:a1="http://schemas.microsoft.com/2003/10/Serialization/Arrays"><a1:long>${xmlEscape(id)}</a1:long></AccountIds></Scope>`,
+    columnTag: "CampaignPerformanceReportColumn",
+    scopeXml: (id)=>`<Scope i:nil="false"><AccountIds i:nil="false" xmlns:a1="http://schemas.microsoft.com/2003/10/Serialization/Arrays"><a1:long>${xmlEscape(id)}</a1:long></AccountIds></Scope>`,
     columns: [
       "TimePeriod",
       "AccountId",
@@ -126,14 +161,15 @@ const REPORTS = [
     table: "bing_campaign_daily",
     conflict: "customer_id,campaign_id,ad_group_id,report_date",
     toRow: (r, customerId)=>{
-      if (!r.GregorianDate || !r.CampaignId) return null;
+      const reportDate = reportDateFromRow(r);
+      if (!reportDate || !r.CampaignId) return null;
       return {
         customer_id: customerId,
         campaign_id: String(r.CampaignId),
         campaign_name: r.CampaignName || null,
         ad_group_id: "",
         ad_group_name: null,
-        report_date: r.GregorianDate,
+        report_date: reportDate,
         impressions: Math.round(num(r.Impressions)),
         clicks: Math.round(num(r.Clicks)),
         spend: num(r.Spend),
@@ -148,7 +184,8 @@ const REPORTS = [
   {
     key: "adgroup",
     reportName: "AdGroupPerformanceReportRequest",
-    scopeXml: (id)=>`<Scope><AccountIds xmlns:a1="http://schemas.microsoft.com/2003/10/Serialization/Arrays"><a1:long>${xmlEscape(id)}</a1:long></AccountIds></Scope>`,
+    columnTag: "AdGroupPerformanceReportColumn",
+    scopeXml: (id)=>`<Scope i:nil="false"><AccountIds i:nil="false" xmlns:a1="http://schemas.microsoft.com/2003/10/Serialization/Arrays"><a1:long>${xmlEscape(id)}</a1:long></AccountIds></Scope>`,
     columns: [
       "TimePeriod",
       "AccountId",
@@ -166,14 +203,15 @@ const REPORTS = [
     table: "bing_campaign_daily",
     conflict: "customer_id,campaign_id,ad_group_id,report_date",
     toRow: (r, customerId)=>{
-      if (!r.GregorianDate || !r.AdGroupId) return null;
+      const reportDate = reportDateFromRow(r);
+      if (!reportDate || !r.AdGroupId) return null;
       return {
         customer_id: customerId,
         campaign_id: String(r.CampaignId || ""),
         campaign_name: r.CampaignName || null,
         ad_group_id: String(r.AdGroupId),
         ad_group_name: r.AdGroupName || null,
-        report_date: r.GregorianDate,
+        report_date: reportDate,
         impressions: Math.round(num(r.Impressions)),
         clicks: Math.round(num(r.Clicks)),
         spend: num(r.Spend),
@@ -188,7 +226,8 @@ const REPORTS = [
   {
     key: "keyword",
     reportName: "KeywordPerformanceReportRequest",
-    scopeXml: (id)=>`<Scope><AccountIds xmlns:a1="http://schemas.microsoft.com/2003/10/Serialization/Arrays"><a1:long>${xmlEscape(id)}</a1:long></AccountIds></Scope>`,
+    columnTag: "KeywordPerformanceReportColumn",
+    scopeXml: (id)=>`<Scope i:nil="false"><AccountIds i:nil="false" xmlns:a1="http://schemas.microsoft.com/2003/10/Serialization/Arrays"><a1:long>${xmlEscape(id)}</a1:long></AccountIds></Scope>`,
     columns: [
       "TimePeriod",
       "AccountId",
@@ -210,7 +249,8 @@ const REPORTS = [
     table: "bing_keyword_daily",
     conflict: "customer_id,campaign_id,ad_group_id,keyword_id,report_date",
     toRow: (r, customerId)=>{
-      if (!r.GregorianDate || !r.KeywordId) return null;
+      const reportDate = reportDateFromRow(r);
+      if (!reportDate || !r.KeywordId) return null;
       return {
         customer_id: customerId,
         campaign_id: String(r.CampaignId || ""),
@@ -220,7 +260,7 @@ const REPORTS = [
         keyword_id: String(r.KeywordId),
         keyword_text: r.Keyword || null,
         match_type: r.BidMatchType || null,
-        report_date: r.GregorianDate,
+        report_date: reportDate,
         impressions: Math.round(num(r.Impressions)),
         clicks: Math.round(num(r.Clicks)),
         spend: num(r.Spend),
@@ -235,7 +275,8 @@ const REPORTS = [
   {
     key: "search_term",
     reportName: "SearchQueryPerformanceReportRequest",
-    scopeXml: (id)=>`<Scope><AccountIds xmlns:a1="http://schemas.microsoft.com/2003/10/Serialization/Arrays"><a1:long>${xmlEscape(id)}</a1:long></AccountIds></Scope>`,
+    columnTag: "SearchQueryPerformanceReportColumn",
+    scopeXml: (id)=>`<Scope i:nil="false"><AccountIds i:nil="false" xmlns:a1="http://schemas.microsoft.com/2003/10/Serialization/Arrays"><a1:long>${xmlEscape(id)}</a1:long></AccountIds></Scope>`,
     columns: [
       "TimePeriod",
       "AccountId",
@@ -246,7 +287,6 @@ const REPORTS = [
       "SearchQuery",
       "Keyword",
       "BidMatchType",
-      "CurrencyCode",
       "Impressions",
       "Clicks",
       "Spend",
@@ -255,7 +295,8 @@ const REPORTS = [
     table: "bing_search_term_daily",
     conflict: "customer_id,campaign_id,ad_group_id,search_term,report_date",
     toRow: (r, customerId)=>{
-      if (!r.GregorianDate || !r.SearchQuery) return null;
+      const reportDate = reportDateFromRow(r);
+      if (!reportDate || !r.SearchQuery) return null;
       return {
         customer_id: customerId,
         campaign_id: String(r.CampaignId || ""),
@@ -265,7 +306,7 @@ const REPORTS = [
         search_term: String(r.SearchQuery),
         keyword_text: r.Keyword || null,
         match_type: r.BidMatchType || null,
-        report_date: r.GregorianDate,
+        report_date: reportDate,
         impressions: Math.round(num(r.Impressions)),
         clicks: Math.round(num(r.Clicks)),
         spend: num(r.Spend),
@@ -278,7 +319,8 @@ const REPORTS = [
   {
     key: "ad",
     reportName: "AdPerformanceReportRequest",
-    scopeXml: (id)=>`<Scope><AccountIds xmlns:a1="http://schemas.microsoft.com/2003/10/Serialization/Arrays"><a1:long>${xmlEscape(id)}</a1:long></AccountIds></Scope>`,
+    columnTag: "AdPerformanceReportColumn",
+    scopeXml: (id)=>`<Scope i:nil="false"><AccountIds i:nil="false" xmlns:a1="http://schemas.microsoft.com/2003/10/Serialization/Arrays"><a1:long>${xmlEscape(id)}</a1:long></AccountIds></Scope>`,
     columns: [
       "TimePeriod",
       "AccountId",
@@ -299,7 +341,8 @@ const REPORTS = [
     table: "bing_ad_daily",
     conflict: "customer_id,campaign_id,ad_group_id,ad_id,report_date",
     toRow: (r, customerId)=>{
-      if (!r.GregorianDate || !r.AdId) return null;
+      const reportDate = reportDateFromRow(r);
+      if (!reportDate || !r.AdId) return null;
       return {
         customer_id: customerId,
         campaign_id: String(r.CampaignId || ""),
@@ -309,7 +352,7 @@ const REPORTS = [
         ad_id: String(r.AdId),
         ad_title: r.AdTitle || null,
         ad_type: r.AdType || null,
-        report_date: r.GregorianDate,
+        report_date: reportDate,
         impressions: Math.round(num(r.Impressions)),
         clicks: Math.round(num(r.Clicks)),
         spend: num(r.Spend),
@@ -323,7 +366,8 @@ const REPORTS = [
   {
     key: "geo",
     reportName: "GeographicPerformanceReportRequest",
-    scopeXml: (id)=>`<Scope><AccountIds xmlns:a1="http://schemas.microsoft.com/2003/10/Serialization/Arrays"><a1:long>${xmlEscape(id)}</a1:long></AccountIds></Scope>`,
+    columnTag: "GeographicPerformanceReportColumn",
+    scopeXml: (id)=>`<Scope i:nil="false"><AccountIds i:nil="false" xmlns:a1="http://schemas.microsoft.com/2003/10/Serialization/Arrays"><a1:long>${xmlEscape(id)}</a1:long></AccountIds></Scope>`,
     columns: [
       "TimePeriod",
       "AccountId",
@@ -342,7 +386,8 @@ const REPORTS = [
     table: "bing_geo_location_daily",
     conflict: "customer_id,campaign_id,location_id,report_date",
     toRow: (r, customerId)=>{
-      if (!r.GregorianDate || !r.CampaignId) return null;
+      const reportDate = reportDateFromRow(r);
+      if (!reportDate || !r.CampaignId) return null;
       const locationId = String(r.LocationId || "");
       const locationName = [
         r.City,
@@ -356,7 +401,7 @@ const REPORTS = [
         location_id: locationId,
         location_name: locationName || null,
         country_code: r.Country || null,
-        report_date: r.GregorianDate,
+        report_date: reportDate,
         impressions: Math.round(num(r.Impressions)),
         clicks: Math.round(num(r.Clicks)),
         spend: num(r.Spend),
@@ -368,20 +413,24 @@ const REPORTS = [
   }
 ];
 function buildSubmitEnvelope(opts) {
-  const colXml = opts.columns.map((c)=>`<ReportColumn>${xmlEscape(c)}</ReportColumn>`).join("");
+  const colXml = opts.columns.map((c)=>`<${opts.columnTag}>${xmlEscape(c)}</${opts.columnTag}>`).join("");
   const [fromY, fromM, fromD] = opts.dateFrom.split("-").map((x)=>parseInt(x, 10));
   const [toY, toM, toD] = opts.dateTo.split("-").map((x)=>parseInt(x, 10));
+  const customerIdHeader = opts.managerCustomerId
+    ? `<CustomerId i:nil="false">${xmlEscape(opts.managerCustomerId)}</CustomerId>`
+    : "";
   return `<?xml version="1.0" encoding="utf-8"?>
-<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:i="http://www.w3.org/2001/XMLSchema-instance" xmlns="${SOAP_NS}">
-  <s:Header>
-    <Action s:mustUnderstand="1">SubmitGenerateReport</Action>
-    <AuthenticationToken>${xmlEscape(opts.accessToken)}</AuthenticationToken>
-    <DeveloperToken>${xmlEscape(opts.developerToken)}</DeveloperToken>
-    <CustomerAccountId>${xmlEscape(opts.customerAccountId)}</CustomerAccountId>
+<s:Envelope xmlns:i="http://www.w3.org/2001/XMLSchema-instance" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+  <s:Header xmlns="${SOAP_NS}">
+    <Action mustUnderstand="1">SubmitGenerateReport</Action>
+    <AuthenticationToken i:nil="false">${xmlEscape(opts.accessToken)}</AuthenticationToken>
+    <CustomerAccountId i:nil="false">${xmlEscape(opts.customerAccountId)}</CustomerAccountId>
+    ${customerIdHeader}
+    <DeveloperToken i:nil="false">${xmlEscape(opts.developerToken)}</DeveloperToken>
   </s:Header>
   <s:Body>
-    <SubmitGenerateReportRequest>
-      <ReportRequest i:type="${opts.reportName}">
+    <SubmitGenerateReportRequest xmlns="${SOAP_NS}">
+      <ReportRequest i:nil="false" i:type="${opts.reportName}">
         <ExcludeColumnHeaders>false</ExcludeColumnHeaders>
         <ExcludeReportFooter>true</ExcludeReportFooter>
         <ExcludeReportHeader>true</ExcludeReportHeader>
@@ -389,15 +438,15 @@ function buildSubmitEnvelope(opts) {
         <ReportName>${xmlEscape(opts.reportName)}</ReportName>
         <ReturnOnlyCompleteData>false</ReturnOnlyCompleteData>
         <Aggregation>Daily</Aggregation>
-        <Columns>${colXml}</Columns>
+        <Columns i:nil="false">${colXml}</Columns>
         ${opts.scopeXml}
-        <Time>
-          <CustomDateRangeEnd>
+        <Time i:nil="false">
+          <CustomDateRangeEnd i:nil="false">
             <Day>${toD}</Day>
             <Month>${toM}</Month>
             <Year>${toY}</Year>
           </CustomDateRangeEnd>
-          <CustomDateRangeStart>
+          <CustomDateRangeStart i:nil="false">
             <Day>${fromD}</Day>
             <Month>${fromM}</Month>
             <Year>${fromY}</Year>
@@ -410,16 +459,20 @@ function buildSubmitEnvelope(opts) {
 </s:Envelope>`;
 }
 function buildPollEnvelope(opts) {
+  const customerIdHeader = opts.managerCustomerId
+    ? `<CustomerId i:nil="false">${xmlEscape(opts.managerCustomerId)}</CustomerId>`
+    : "";
   return `<?xml version="1.0" encoding="utf-8"?>
-<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:i="http://www.w3.org/2001/XMLSchema-instance" xmlns="${SOAP_NS}">
-  <s:Header>
-    <Action s:mustUnderstand="1">PollGenerateReport</Action>
-    <AuthenticationToken>${xmlEscape(opts.accessToken)}</AuthenticationToken>
-    <DeveloperToken>${xmlEscape(opts.developerToken)}</DeveloperToken>
-    <CustomerAccountId>${xmlEscape(opts.customerAccountId)}</CustomerAccountId>
+<s:Envelope xmlns:i="http://www.w3.org/2001/XMLSchema-instance" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+  <s:Header xmlns="${SOAP_NS}">
+    <Action mustUnderstand="1">PollGenerateReport</Action>
+    <AuthenticationToken i:nil="false">${xmlEscape(opts.accessToken)}</AuthenticationToken>
+    <CustomerAccountId i:nil="false">${xmlEscape(opts.customerAccountId)}</CustomerAccountId>
+    ${customerIdHeader}
+    <DeveloperToken i:nil="false">${xmlEscape(opts.developerToken)}</DeveloperToken>
   </s:Header>
   <s:Body>
-    <PollGenerateReportRequest>
+    <PollGenerateReportRequest xmlns="${SOAP_NS}">
       <ReportRequestId>${xmlEscape(opts.reportRequestId)}</ReportRequestId>
     </PollGenerateReportRequest>
   </s:Body>
@@ -439,6 +492,72 @@ async function soapCall(action, envelope) {
     ok: res.ok,
     xml,
     status: res.status
+  };
+}
+async function searchBingAccounts(accessToken, developerToken, predicates) {
+  const res = await fetch("https://clientcenter.api.bingads.microsoft.com/CustomerManagement/v13/Accounts/Search", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      AuthenticationToken: accessToken,
+      DeveloperToken: developerToken
+    },
+    body: JSON.stringify({
+      Predicates: predicates,
+      Ordering: [
+        {
+          Field: "Id",
+          Order: "Ascending"
+        }
+      ],
+      PageInfo: {
+        Index: 0,
+        Size: 100
+      }
+    })
+  });
+  const json = await res.json().catch(()=>({}));
+  if (!res.ok) {
+    throw new Error(`Accounts/Search failed (${res.status}): ${JSON.stringify(json).slice(0, 240)}`);
+  }
+  return json.Accounts || json.accounts || [];
+}
+/** Manager IDs from the Microsoft UI are CustomerIds; reporting needs child Advertiser AccountIds. */ async function resolveBingAccountIds(accessToken, developerToken, requestedId, log) {
+  const children = await searchBingAccounts(accessToken, developerToken, [
+    {
+      Field: "CustomerId",
+      Operator: "Equals",
+      Value: requestedId
+    }
+  ]);
+  if (children.length) {
+    const summary = children.map((a)=>`${a.Id ?? a.id}:${a.Name ?? a.name ?? ""}:${a.AccountType ?? a.accountType ?? ""}`).join("; ");
+    log(`Found ${children.length} account(s) for manager ${requestedId}: ${summary}`);
+    const advertiser = children.find((a)=>{
+      const t = String(a.AccountType ?? a.accountType ?? "").toLowerCase();
+      return !t || t === "advertiser";
+    }) || children[0];
+    const advertiserAccountId = String(advertiser.Id ?? advertiser.id ?? "");
+    log(`Resolved manager ${requestedId} → advertiser account ${advertiserAccountId} (${advertiser.Name ?? advertiser.name ?? ""})`);
+    return {
+      managerCustomerId: requestedId,
+      advertiserAccountId
+    };
+  }
+  const all = await searchBingAccounts(accessToken, developerToken, []);
+  const direct = all.find((a)=>String(a.Id ?? a.id ?? "") === requestedId);
+  if (direct) {
+    const managerCustomerId = String(direct.ParentCustomerId ?? direct.parentCustomerId ?? requestedId);
+    log(`Using advertiser account ${requestedId} (manager ${managerCustomerId})`);
+    return {
+      managerCustomerId,
+      advertiserAccountId: requestedId
+    };
+  }
+  log(`Could not resolve advertiser account for ${requestedId}; using as-is`);
+  return {
+    managerCustomerId: requestedId,
+    advertiserAccountId: requestedId
   };
 }
 Deno.serve(async (req)=>{
@@ -471,6 +590,7 @@ Deno.serve(async (req)=>{
     }
     const customerId = body.customer_id || null;
     const mode = body.mode || "daily";
+    const debug = Boolean(body.debug);
     const daysBack = num(body.days_back) || 5;
     let dateFrom = body.date_from || "";
     let dateTo = body.date_to || "";
@@ -564,6 +684,7 @@ Deno.serve(async (req)=>{
       });
       log("Refreshed Bing access token.");
     }
+    const { managerCustomerId, advertiserAccountId } = await resolveBingAccountIds(accessToken, developerToken, customerId, log);
     // ---- DB upsert helper ----
     async function su(table, rows, conflict) {
       if (!rows.length) return 0;
@@ -603,9 +724,11 @@ Deno.serve(async (req)=>{
         const submit = await soapCall("SubmitGenerateReport", buildSubmitEnvelope({
           accessToken,
           developerToken,
-          customerAccountId: customerId,
+          managerCustomerId,
+          customerAccountId: advertiserAccountId,
           reportName: spec.reportName,
-          scopeXml: spec.scopeXml(customerId),
+          columnTag: spec.columnTag,
+          scopeXml: spec.scopeXml(advertiserAccountId),
           columns: spec.columns,
           dateFrom,
           dateTo
@@ -616,7 +739,7 @@ Deno.serve(async (req)=>{
         }
         const reportRequestId = getTag(submit.xml, "ReportRequestId");
         if (!reportRequestId) {
-          log(`Submit ${spec.key}: no ReportRequestId in response.`);
+          log(`Submit ${spec.key}: no ReportRequestId in response — ${getFaultMessage(submit.xml) || submit.xml.slice(0, 320)}`);
           continue;
         }
         let downloadUrl = null;
@@ -626,7 +749,8 @@ Deno.serve(async (req)=>{
           const poll = await soapCall("PollGenerateReport", buildPollEnvelope({
             accessToken,
             developerToken,
-            customerAccountId: customerId,
+            managerCustomerId,
+            customerAccountId: advertiserAccountId,
             reportRequestId
           }));
           if (!poll.ok) {
@@ -636,7 +760,10 @@ Deno.serve(async (req)=>{
           const status = getTag(poll.xml, "Status") || "";
           lastStatus = status;
           if (status === "Success") {
-            downloadUrl = getTag(poll.xml, "ReportDownloadUrl");
+            downloadUrl = getDownloadUrl(poll.xml);
+            if (debug) {
+              log(`Poll ${spec.key} XML: ${poll.xml.slice(0, 1500)}`);
+            }
             break;
           }
           if (status === "Error" || status === "Failure") {
@@ -645,7 +772,11 @@ Deno.serve(async (req)=>{
           }
         }
         if (!downloadUrl) {
-          log(`Report ${spec.key} did not complete (last status: ${lastStatus}).`);
+          if (lastStatus === "Success") {
+            log(`Report ${spec.key}: no data for ${dateFrom}–${dateTo}.`);
+          } else {
+            log(`Report ${spec.key} did not complete (last status: ${lastStatus}).`);
+          }
           continue;
         }
         const dlRes = await fetch(downloadUrl);
@@ -653,15 +784,7 @@ Deno.serve(async (req)=>{
           log(`Download ${spec.key} failed: ${dlRes.status}`);
           continue;
         }
-        // Microsoft sometimes returns CSV uncompressed and sometimes ZIP. We requested
-        // Format=Csv which for daily aggregations is uncompressed UTF-8 CSV in practice.
-        const buf = await dlRes.arrayBuffer();
-        const u8 = new Uint8Array(buf);
-        if (u8[0] === 0x50 && u8[1] === 0x4b) {
-          log(`Report ${spec.key}: ZIP responses are not supported by this function; consider raising the date range chunking or contact dev.`);
-          continue;
-        }
-        const text = new TextDecoder("utf-8").decode(u8);
+        const text = extractReportText(await dlRes.arrayBuffer());
         const { rows } = parseCsv(text);
         const dbRows = [];
         for (const r of rows){

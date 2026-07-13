@@ -44,7 +44,7 @@ foreach ($customerId in $CustomerIds) {
         Write-Warning "  Error: $($resp.error)"
         continue
       }
-      $rows = [int]($resp.total_rows ?? 0)
+      $rows = if ($null -ne $resp.total_rows) { [int]$resp.total_rows } else { 0 }
       $totalRows += $rows
       Write-Host "  OK ($rows rows)" -ForegroundColor Green
     } catch {
