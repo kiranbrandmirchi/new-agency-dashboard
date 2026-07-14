@@ -1,5 +1,5 @@
 import React from 'react';
-import { GoogleAdsLogo, MetaAdsLogo, RedditAdsLogo } from '../components/PlatformLogos';
+import { GoogleAdsLogo, MetaAdsLogo, MicrosoftAdsLogo, RedditAdsLogo } from '../components/PlatformLogos';
 
 /**
  * Shared nav items for Sidebar and redirect logic.
@@ -20,7 +20,7 @@ export const NAV_ITEMS = [
   {
     id: 'bing-ads', label: 'Bing / Microsoft Ads', section: 'Ad Platforms',
     permission: 'sidebar.bing_ads',
-    logo: <svg viewBox="0 0 24 24" width="16" height="16"><path d="M5 3v16.1l4.5 2.5 8-4.6v-4.3L10 8.5V1L5 3z" fill="#00809D"/><path d="M10 8.5v7.1l5.5 3.1 2-1.1v-4.3L10 8.5z" fill="#00B294" opacity=".8"/></svg>,
+    logo: <MicrosoftAdsLogo size={16} />,
   },
   {
     id: 'tiktok-ads', label: 'TikTok Ads', section: 'Ad Platforms',

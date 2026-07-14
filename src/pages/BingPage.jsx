@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useBingData } from '../hooks/useBingData';
 import { useAuth } from '../context/AuthContext';
 import { DateRangePicker } from '../components/DatePicker';
+import { MicrosoftAdsLogo } from '../components/PlatformLogos';
 import Chart from 'chart.js/auto';
 
 const fU = (n) => '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -305,7 +306,7 @@ export function BingPage() {
         <div className="page-title-bar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
           <div>
             <h2 style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, background: '#00809D', color: '#fff', borderRadius: 8, fontSize: 14, fontWeight: 800 }}>b</span>
+              <MicrosoftAdsLogo size={28} />
               Bing / Microsoft Ads
             </h2>
             <p>Search & audience performance across Microsoft Advertising</p>

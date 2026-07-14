@@ -1,5 +1,5 @@
 import React from 'react';
-import { GoogleAdsLogo, MetaAdsLogo, RedditAdsLogo } from './PlatformLogos';
+import { GoogleAdsLogo, MetaAdsLogo, MicrosoftAdsLogo, RedditAdsLogo } from './PlatformLogos';
 
 const fU = (n) => '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fI = (n) => Math.round(Number(n || 0)).toLocaleString('en-US');
@@ -308,7 +308,7 @@ export function ReportPreview({ report, accounts, sections, uploads, platformDat
       {bingAccs.length > 0 && (
         <div className="rp-section">
           <div className="rp-section-header">
-            <div className="rp-section-icon" style={{ background: 'linear-gradient(135deg,#00809D,#00B294)' }}>b</div>
+            <div className="rp-section-icon" style={{ background: 'transparent' }}><MicrosoftAdsLogo size={28} /></div>
             <h2>Bing / Microsoft Ads</h2>
           </div>
           {bingAccs.map((acc) => (
