@@ -18,8 +18,13 @@ import {
   resolveAuctionSheetUrl,
   resolveAuctionSheetPreviousUrl,
 } from './auctionInsightsSheet';
+import {
+  DEFAULT_COVER_LOGO_URL,
+  getAgencyPreparedBy,
+  getAgencyWebsite,
+} from './agencyBranding';
 
-export const DEFAULT_COVER_LOGO_URL = '/brand-logo.png';
+export { DEFAULT_COVER_LOGO_URL };
 
 function mapAuctionTableRows(rows) {
   return (rows || []).map((r) => ({
@@ -106,8 +111,8 @@ export function buildMonthlyExportData({
   const cmpOn = compareOn !== undefined
     ? !!compareOn
     : (slideData?.compareOn !== undefined ? !!slideData.compareOn : true);
-  const preparedBy = agency?.agency_name || 'Chipper Digital';
-  const website = (agency?.website_url || 'chipperdigital.io').replace(/^https?:\/\//, '');
+  const preparedBy = getAgencyPreparedBy(agency);
+  const website = getAgencyWebsite(agency);
 
   const servicesRaw = parseSectionJson(sections, 'slide2_services', DEFAULT_SLIDE2_SERVICES);
   const services = getEnabledSlide2Services(servicesRaw);

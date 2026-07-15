@@ -1,7 +1,8 @@
 import React, { useEffect, useLayoutEffect, useRef } from 'react';
 import { CsvUploader } from './CsvUploader';
 import { useLogoForDarkBackground } from '../utils/loadImageDataUrl';
-import { DEFAULT_COVER_LOGO_URL } from '../utils/buildMonthlyExportData';
+import { getAgencyBrandLabel, getAgencyPreparedBy, getAgencyWebsite, DEFAULT_COVER_LOGO_URL } from '../utils/agencyBranding';
+import { ReportBrandingProvider, useReportBranding } from '../context/ReportBrandingContext';
 import {
   parseSectionJson,
   getSectionText,
@@ -90,9 +91,10 @@ function EditableText({ value, onChange, className, multiline, disabled, as = 'd
 }
 
 function Footer({ monthLabel }) {
+  const { agencyName } = useReportBranding();
   return (
     <div className="mr-slide-red-bar mr-slide-red-bar--footer">
-      <span className="mr-slide-footer-brand">CHIPPER DIGITAL</span>
+      <span className="mr-slide-footer-brand">{agencyName}</span>
       <span className="mr-slide-footer-sep">|</span>
       <span className="mr-slide-footer-title">SEO &amp; DIGITAL MARKETING REPORT</span>
       <span className="mr-slide-footer-sep">|</span>
@@ -124,14 +126,15 @@ function NotesBox({ title = 'Notes', children }) {
 }
 
 function Slide1({ clientName, monthLabel, agency, coverLogoUrl }) {
-  const preparedBy = agency?.agency_name || 'Chipper Digital';
-  const website = (agency?.website_url || 'chipperdigital.io').replace(/^https?:\/\//, '');
+  const preparedBy = getAgencyPreparedBy(agency);
+  const website = getAgencyWebsite(agency);
+  const brandLabel = getAgencyBrandLabel(agency);
   const logoSrc = useLogoForDarkBackground(coverLogoUrl || DEFAULT_COVER_LOGO_URL);
   return (
     <div className="mr-slide-inner mr-slide-cover">
       <div className="mr-slide-cover-left">
         <div className="mr-slide-cover-left-inner">
-          <div className="mr-slide-cover-brand">CHIPPER DIGITAL</div>
+          <div className="mr-slide-cover-brand">{brandLabel}</div>
           <div className="mr-slide-cover-rule" />
           <div className="mr-slide-cover-month">{monthLabel}</div>
         </div>
@@ -772,25 +775,28 @@ export function MonthlySlideGrid({
   exportMode = false,
   slidesOnly = false,
 }) {
+  const preparedBy = getAgencyPreparedBy(agency);
   const grid = (
-    <div className="mr-slide-preview-grid">
-      {SLIDE_DEFINITIONS.map((slide, index) => (
-        <MonthlySlidePreview
-          key={slide.num}
-          slideNum={slide.num}
-          index={index}
-          exportMode={exportMode}
-          clientName={clientName}
-          monthLabel={monthLabel}
-          agency={agency}
-          slideData={slideData}
-          sections={sections}
-          editable={editable}
-          handlers={handlers}
-          seoHandlers={seoHandlers}
-        />
-      ))}
-    </div>
+    <ReportBrandingProvider agency={agency}>
+      <div className="mr-slide-preview-grid">
+        {SLIDE_DEFINITIONS.map((slide, index) => (
+          <MonthlySlidePreview
+            key={slide.num}
+            slideNum={slide.num}
+            index={index}
+            exportMode={exportMode}
+            clientName={clientName}
+            monthLabel={monthLabel}
+            agency={agency}
+            slideData={slideData}
+            sections={sections}
+            editable={editable}
+            handlers={handlers}
+            seoHandlers={seoHandlers}
+          />
+        ))}
+      </div>
+    </ReportBrandingProvider>
   );
 
   if (slidesOnly) return grid;
@@ -799,7 +805,7 @@ export function MonthlySlideGrid({
     <section className="mr-slide-preview-section">
       <div className="mr-slide-preview-header">
         <h3>{clientName} — {monthLabel} Slide Report</h3>
-        <p>Chipper Digital branded slides with live Supabase data</p>
+        <p>{preparedBy} branded slides with live Supabase data</p>
       </div>
       {grid}
     </section>

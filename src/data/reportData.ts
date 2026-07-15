@@ -6,8 +6,8 @@ export const reportData = {
   client: 'Neulife Rehabilitation',
   location: 'Florida',
   month: 'April 2026',
-  preparedBy: 'Chipper Digital',
-  website: 'chipperdigital.io',
+  preparedBy: 'Agency',
+  website: 'agency.com',
   /** Cover slide logo (public/) — used in preview, PDF, and PPTX */
   coverLogoUrl: '/brand-logo.png',
 

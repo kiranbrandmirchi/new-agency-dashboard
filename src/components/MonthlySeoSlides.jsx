@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { CsvUploader } from './CsvUploader';
+import { useReportBranding } from '../context/ReportBrandingContext';
+import { getAgencyPreparedBy, getAgencyWebsite } from '../utils/agencyBranding';
 import {
   DEFAULT_SEO_EXECUTIVE_SECTIONS,
   DEFAULT_SEO_WEBDEV_ITEMS,
@@ -22,9 +24,10 @@ import {
 } from '../utils/googleSheetsEmbed';
 
 function Footer({ monthLabel }) {
+  const { agencyName } = useReportBranding();
   return (
     <div className="mr-slide-red-bar mr-slide-red-bar--footer">
-      <span className="mr-slide-footer-brand">CHIPPER DIGITAL</span>
+      <span className="mr-slide-footer-brand">{agencyName}</span>
       <span className="mr-slide-footer-sep">|</span>
       <span className="mr-slide-footer-title">SEO &amp; DIGITAL MARKETING REPORT</span>
       <span className="mr-slide-footer-sep">|</span>
@@ -1177,8 +1180,8 @@ export function SlideBlogUpdate({ post, editable, onChangePost, clientName, mont
 }
 
 export function Slide31ThankYou({ clientName, monthLabel, periodLabel, agency, clientWebsite }) {
-  const preparedBy = agency?.agency_name || 'Chipper Digital';
-  const website = (agency?.website_url || 'chipperdigital.io').replace(/^https?:\/\//, '');
+  const preparedBy = getAgencyPreparedBy(agency);
+  const website = getAgencyWebsite(agency);
   return (
     <div className="mr-slide-inner mr-slide-cover mr-slide-thankyou">
       <h2 className="mr-slide-thankyou-title">Thank You!</h2>

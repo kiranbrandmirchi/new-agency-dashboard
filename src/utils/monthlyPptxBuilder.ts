@@ -4,6 +4,7 @@ import { loadLogoForDarkBackground } from './loadImageDataUrl';
 import { addSeoSlidesToPptx } from './monthlySeoPptxBuilder';
 import { formatDisplayPeriodLabel } from './monthlyReportHelpers';
 import { DEFAULT_COVER_LOGO_URL } from './buildMonthlyExportData';
+import { brandLabelFromPreparedBy } from './agencyBranding';
 import {
   COVER_LEFT_W_IN,
   COVER_RIGHT_W_IN,
@@ -176,10 +177,10 @@ function redHeader(slide: PptxSlide, title: string, right?: string) {
   }
 }
 
-function redFooter(slide: PptxSlide, month: string) {
+function redFooter(slide: PptxSlide, month: string, brandName = 'AGENCY') {
   slide.addShape('rect', { x: 0, y: FOOTER_Y, w: 10, h: FOOTER_H, fill: { color: C.redBar } });
   slide.addText([
-    { text: 'CHIPPER DIGITAL', options: { bold: true, fontSize: 9 } },
+    { text: brandName, options: { bold: true, fontSize: 9 } },
     { text: ' | SEO & DIGITAL MARKETING REPORT | ', options: { fontSize: 8 } },
     { text: month, options: { fontSize: 8 } },
   ], { x: 0.2, y: FOOTER_Y + 0.05, w: 9.6, h: 0.2, color: C.white, valign: 'middle' });
@@ -289,7 +290,7 @@ function addCoverSlide(pptx: PptxGenJS, data: MonthlyExportData, logoDataUrl: st
 
   // Left column — brand block vertically centered
   const leftBrandY = SLIDE_H * 0.38;
-  slide.addText('CHIPPER DIGITAL', {
+  slide.addText(brandLabelFromPreparedBy(data.preparedBy), {
     x: leftPad,
     y: leftBrandY,
     w: COVER_LEFT_W_IN - leftPad * 2,
@@ -403,7 +404,7 @@ function addContentSlide2(pptx: PptxGenJS, data: MonthlyExportData) {
     slide.addText(svc.body, { x: 1.05, y: y + cardH * 0.4, w: 8.4, h: cardH * 0.52, fontSize: bodyFont, color: C.slate, lineSpacing: count >= 4 ? 12 : 14 });
   });
   addBottomNotesBox(slide, 'Notes', [], 'Service scope and campaign notes.');
-  redFooter(slide, data.month);
+  redFooter(slide, data.month, brandLabelFromPreparedBy(data.preparedBy));
 }
 
 /** Slide 3 — Lead Summary */
@@ -500,7 +501,7 @@ function addLeadSummarySlide(pptx: PptxGenJS, data: MonthlyExportData) {
     });
   });
   addBottomNotesBox(slide, 'Notes', [], 'Lead summary notes and call-tracking highlights.');
-  redFooter(slide, data.month);
+  redFooter(slide, data.month, brandLabelFromPreparedBy(data.preparedBy));
 }
 
 /** Slide 4 — Section divider */
@@ -620,7 +621,7 @@ function addPaidAdsOverallSlide(pptx: PptxGenJS, data: MonthlyExportData) {
     border,
   });
   addBottomNotesBox(slide, 'Notes', [], 'Paid ads performance notes and recommendations.');
-  redFooter(slide, data.month);
+  redFooter(slide, data.month, brandLabelFromPreparedBy(data.preparedBy));
 }
 
 /** Slide 6 — Performance Overview */
@@ -733,7 +734,7 @@ function addPaidAdsFloridaSlide(pptx: PptxGenJS, data: MonthlyExportData) {
     border: metricsBorder,
   });
   addBottomNotesBox(slide, 'Notes', [], 'Performance trends and recommendations.');
-  redFooter(slide, data.month);
+  redFooter(slide, data.month, brandLabelFromPreparedBy(data.preparedBy));
 }
 
 /** Slide 7 — Search Overview */
@@ -763,7 +764,7 @@ function addSearchOverviewSlide(pptx: PptxGenJS, data: MonthlyExportData) {
     border,
   });
   addBottomNotesBox(slide, 'Notes', [], 'Search channel insights and organic vs paid trends.');
-  redFooter(slide, data.month);
+  redFooter(slide, data.month, brandLabelFromPreparedBy(data.preparedBy));
 }
 
 /** Slide 8 — Top Keywords */
@@ -800,7 +801,7 @@ function addTopKeywordsSlide(pptx: PptxGenJS, data: MonthlyExportData) {
     insightText ? [insightText] : [],
     'Add keyword insights in the report editor.',
   );
-  redFooter(slide, data.month);
+  redFooter(slide, data.month, brandLabelFromPreparedBy(data.preparedBy));
 }
 
 /** Slide 9 — Auction Insights (current month above, previous below) */
@@ -919,7 +920,7 @@ function addAuctionInsightsSlide(pptx: PptxGenJS, data: MonthlyExportData) {
     insights,
     'Add auction insights in the report editor.',
   );
-  redFooter(slide, data.month);
+  redFooter(slide, data.month, brandLabelFromPreparedBy(data.preparedBy));
 }
 
 /** Slide 10 — Campaign Progress */
@@ -973,7 +974,7 @@ function addCampaignProgressSlide(pptx: PptxGenJS, data: MonthlyExportData) {
     valign: 'top',
   });
   addBottomNotesBox(slide, 'Notes', [], 'Campaign progress notes and follow-up items.');
-  redFooter(slide, data.month);
+  redFooter(slide, data.month, brandLabelFromPreparedBy(data.preparedBy));
 }
 
 export type GenerateMonthlyPptxOptions = {
@@ -990,7 +991,7 @@ export async function buildEditableMonthlyPptx(
   const PptxCtor = (PptxGenJS as unknown as { default?: typeof PptxGenJS }).default ?? PptxGenJS;
   const pptx = new PptxCtor();
   pptx.layout = 'LAYOUT_16x9';
-  pptx.author = 'Chipper Digital';
+  pptx.author = data.preparedBy || 'Agency';
   pptx.title = `${options.clientName} — ${options.monthLabel}`;
 
   const logoDataUrl = await loadLogoForDarkBackground(data.coverLogoUrl ?? DEFAULT_COVER_LOGO_URL);

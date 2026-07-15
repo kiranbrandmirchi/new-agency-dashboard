@@ -38,9 +38,6 @@ function EditableText({ value, onChange, className }) {
   );
 }
 
-const FOOTER_TEXT = (month) =>
-  `Chipper Digital | SEO & Digital Marketing Report | ${month}`;
-
 function RedHeader({ title, right }) {
   return (
     <div className="ppt-red-bar ppt-red-bar--header">
@@ -52,9 +49,10 @@ function RedHeader({ title, right }) {
 
 function RedFooter() {
   const report = useReport();
+  const brand = (report.preparedBy || 'Agency').toUpperCase();
   return (
     <div className="ppt-red-bar ppt-red-bar--footer">
-      {FOOTER_TEXT(report.month)}
+      {`${brand} | SEO & Digital Marketing Report | ${report.month}`}
     </div>
   );
 }

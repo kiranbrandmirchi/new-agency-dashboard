@@ -2,6 +2,7 @@ import PptxGenJS from 'pptxgenjs';
 import type { ReportData } from '../data/reportData';
 import { buildReportFileName } from './reportFileName';
 import { loadImageDataUrl } from './loadImageDataUrl';
+import { brandLabelFromPreparedBy } from './agencyBranding';
 import {
   COVER_LEFT_W_IN,
   COVER_RIGHT_W_IN,
@@ -85,9 +86,9 @@ function redHeader(slide: PptxSlide, title: string, right?: string) {
   }
 }
 
-function redFooter(slide: PptxSlide, month: string) {
+function redFooter(slide: PptxSlide, month: string, brandName = 'AGENCY') {
   slide.addShape('rect', { x: 0, y: FOOTER_Y, w: 10, h: FOOTER_H, fill: { color: C.redBar } });
-  slide.addText(`Chipper Digital | SEO & Digital Marketing Report | ${month}`, {
+  slide.addText(`${brandName} | SEO & Digital Marketing Report | ${month}`, {
     x: 0.2,
     y: FOOTER_Y + 0.05,
     w: 9.6,
@@ -244,7 +245,7 @@ function addCoverSlide(pptx: PptxGenJS, data: ReportData, logoDataUrl: string | 
       h: COVER_LOGO_SIZE,
     });
   }
-  slide.addText('CHIPPER\nDIGITAL', {
+  slide.addText(brandLabelFromPreparedBy(data.preparedBy).replace(/\s+/g, '\n'), {
     x: SLIDE_W_IN - 1.1,
     y: COVER_LOGO_Y,
     w: 1.05,
@@ -309,7 +310,7 @@ function addContentSlide2(pptx: PptxGenJS, data: ReportData) {
     slide.addText(svc.body, { x: 1.05, y: y + 0.48, w: 8.4, h: 0.75, fontSize: 10, color: C.slate, lineSpacing: 14 });
   });
   addSlideBottomInsight(slide, data, 2);
-  redFooter(slide, data.month);
+  redFooter(slide, data.month, brandLabelFromPreparedBy(data.preparedBy));
 }
 
 /** Slide 3 — Lead Summary */
@@ -391,7 +392,7 @@ function addLeadSummarySlide(pptx: PptxGenJS, data: ReportData) {
     }
   });
   addSlideBottomInsight(slide, data, 3);
-  redFooter(slide, data.month);
+  redFooter(slide, data.month, brandLabelFromPreparedBy(data.preparedBy));
 }
 function addSectionSlide(pptx: PptxGenJS, data: ReportData) {
   const slide = pptx.addSlide();
@@ -486,7 +487,7 @@ function addPaidAdsOverallSlide(pptx: PptxGenJS, data: ReportData) {
     border,
   });
   addSlideBottomInsight(slide, data, 5);
-  redFooter(slide, data.month);
+  redFooter(slide, data.month, brandLabelFromPreparedBy(data.preparedBy));
 }
 
 /** Slide 6 — Performance Overview */
@@ -565,7 +566,7 @@ function addPaidAdsFloridaSlide(pptx: PptxGenJS, data: ReportData) {
     border: { pt: 0.5, color: 'CCCCCC' },
   });
   addSlideBottomInsight(slide, data, 6);
-  redFooter(slide, data.month);
+  redFooter(slide, data.month, brandLabelFromPreparedBy(data.preparedBy));
 }
 
 /** Slide 7 — Search Overview */
@@ -596,7 +597,7 @@ function addSearchOverviewSlide(pptx: PptxGenJS, data: ReportData) {
     border,
   });
   addSlideBottomInsight(slide, data, 7);
-  redFooter(slide, data.month);
+  redFooter(slide, data.month, brandLabelFromPreparedBy(data.preparedBy));
 }
 
 /** Slide 8 — Top Keywords */
@@ -635,7 +636,7 @@ function addTopKeywordsSlide(pptx: PptxGenJS, data: ReportData) {
     border,
   });
   addInsightBox(slide, MAIN_Y + 1.62, null, [data.topKeywords.insight]);
-  redFooter(slide, data.month);
+  redFooter(slide, data.month, brandLabelFromPreparedBy(data.preparedBy));
 }
 
 /** Slide 9 — Auction Insights */
@@ -679,7 +680,7 @@ function addAuctionInsightsSlide(pptx: PptxGenJS, data: ReportData) {
     border,
   });
   addInsightBox(slide, MAIN_Y + 1.18, 'Auction Insight', data.auctionInsights.insights);
-  redFooter(slide, data.month);
+  redFooter(slide, data.month, brandLabelFromPreparedBy(data.preparedBy));
 }
 
 /** Slide 10 — Campaign Progress */
@@ -725,7 +726,7 @@ function addCampaignProgressSlide(pptx: PptxGenJS, data: ReportData) {
     color: C.slate,
     lineSpacing: 12,
   });
-  redFooter(slide, data.month);
+  redFooter(slide, data.month, brandLabelFromPreparedBy(data.preparedBy));
 }
 
 export type GeneratePptxOptions = {

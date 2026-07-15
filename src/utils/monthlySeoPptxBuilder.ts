@@ -2,6 +2,7 @@ import type PptxGenJS from 'pptxgenjs';
 import { SLIDE_H_IN } from './slideDimensions';
 import { isDirectImageUrl, parseGoogleSheetsUrl, resolveKeywordSheetUrl } from './googleSheetsEmbed';
 import { formatDisplayPeriodLabel } from './monthlyReportHelpers';
+import { brandLabelFromPreparedBy } from './agencyBranding';
 
 const SLIDE_H = SLIDE_H_IN;
 const HEADER_H = 0.39;
@@ -33,10 +34,10 @@ function redHeader(slide: PptxSlide, title: string, right?: string) {
   if (right) slide.addText(right, { x: 6.5, y: 0.07, w: 3.3, h: 0.34, fontSize: 10, color: C.white, align: 'right', valign: 'middle' });
 }
 
-function redFooter(slide: PptxSlide, month: string) {
+function redFooter(slide: PptxSlide, month: string, brandName = 'AGENCY') {
   slide.addShape('rect', { x: 0, y: FOOTER_Y, w: 10, h: FOOTER_H, fill: { color: C.redBar } });
   slide.addText([
-    { text: 'CHIPPER DIGITAL', options: { bold: true, fontSize: 10 } },
+    { text: brandName, options: { bold: true, fontSize: 10 } },
     { text: ' | SEO & DIGITAL MARKETING REPORT | ', options: { fontSize: 9 } },
     { text: month, options: { fontSize: 9 } },
   ], { x: 0.2, y: FOOTER_Y + 0.04, w: 9.6, h: 0.2, color: C.white, valign: 'middle' });
@@ -414,6 +415,8 @@ const DEFAULT_KEYWORD_INSIGHTS = [
 export function addSeoSlidesToPptx(pptx: PptxGenJS, data: Record<string, unknown>) {
   const month = String(data.month || '');
   const client = String(data.client || '');
+  const preparedBy = String(data.preparedBy || 'Agency');
+  const brandName = brandLabelFromPreparedBy(preparedBy);
   const seo = (data.seo || {}) as Record<string, unknown>;
   const periodLabel = String(seo.periodLabel || month);
   const currentLabel = String(seo.currentLabel || month);
@@ -457,7 +460,7 @@ export function addSeoSlidesToPptx(pptx: PptxGenJS, data: Record<string, unknown
       );
     });
     addCompactNotesBox(slide, executiveSections.notes);
-    redFooter(slide, month);
+    redFooter(slide, month, brandName);
   }
 
   sectionSlide(pptx, 'Google Analytics 4 Performance', `${client} | ${periodLabel}`);
@@ -489,7 +492,7 @@ export function addSeoSlidesToPptx(pptx: PptxGenJS, data: Record<string, unknown
       slide.addText(s13.insight, { x: 0.35, y: contentBottomY() - 0.36, w: 9.3, h: 0.2, fontSize: 7, color: C.slate, valign: 'top' });
     }
     addCompactNotesBox(slide);
-    redFooter(slide, month);
+    redFooter(slide, month, brandName);
   }
 
   // 14 All channels (both periods)
@@ -523,7 +526,7 @@ export function addSeoSlidesToPptx(pptx: PptxGenJS, data: Record<string, unknown
     addChannelTable(resolvePeriodLabel(combined.current?.periodLabel, currentShortLabel, 'Current'), combined.current?.table);
     if (showCompare) addChannelTable(resolvePeriodLabel(combined.previous?.periodLabel, previousShortLabel, 'Previous'), combined.previous?.table);
     addCompactNotesBox(slide);
-    redFooter(slide, month);
+    redFooter(slide, month, brandName);
   }
 
   // 15 Landing pages (both periods)
@@ -558,7 +561,7 @@ export function addSeoSlidesToPptx(pptx: PptxGenJS, data: Record<string, unknown
     addLanding(resolvePeriodLabel(combined.current?.periodLabel, currentShortLabel, 'Current'), combined.current?.table);
     if (showCompare) addLanding(resolvePeriodLabel(combined.previous?.periodLabel, previousShortLabel, 'Previous'), combined.previous?.table);
     addCompactNotesBox(slide);
-    redFooter(slide, month);
+    redFooter(slide, month, brandName);
   }
 
   // 16 Top cities (both periods)
@@ -592,7 +595,7 @@ export function addSeoSlidesToPptx(pptx: PptxGenJS, data: Record<string, unknown
     addCities(resolvePeriodLabel(combined.current?.periodLabel, currentShortLabel, 'Current'), combined.current?.table);
     if (showCompare) addCities(resolvePeriodLabel(combined.previous?.periodLabel, previousShortLabel, 'Previous'), combined.previous?.table);
     addCompactNotesBox(slide);
-    redFooter(slide, month);
+    redFooter(slide, month, brandName);
   }
 
   sectionSlide(pptx, 'Google Search Console & Rankings', `${client} | ${periodLabel}`);
@@ -645,7 +648,7 @@ export function addSeoSlidesToPptx(pptx: PptxGenJS, data: Record<string, unknown
     renderQueryBlock('Branded Queries', 3.35, 3.05, s22.brandedTable, 'No branded queries');
     renderQueryBlock('Non-Branded Queries', 6.5, 3.05, s22.nonBrandedTable, 'No non-branded queries');
     addCompactNotesBox(slide, gscNotes || String((s22 as { notes?: string }).notes || ''));
-    redFooter(slide, month);
+    redFooter(slide, month, brandName);
   }
 
   // 19 Top 20 search queries (after GSC)
@@ -694,7 +697,7 @@ export function addSeoSlidesToPptx(pptx: PptxGenJS, data: Record<string, unknown
       border: SLIDE_BORDER,
       fontSize: 7.5,
     });
-    redFooter(slide, month);
+    redFooter(slide, month, brandName);
   }
 
   // 20–21 GBP (after Top 20)
@@ -776,7 +779,7 @@ export function addSeoSlidesToPptx(pptx: PptxGenJS, data: Record<string, unknown
       });
     });
     addCompactNotesBox(slide, gbpNotes);
-    redFooter(slide, month);
+    redFooter(slide, month, brandName);
   }
 
   // 22 Keyword tracker + insights (Neulife slide 17)
@@ -832,7 +835,7 @@ export function addSeoSlidesToPptx(pptx: PptxGenJS, data: Record<string, unknown
         lineSpacing: 16,
       });
     });
-    redFooter(slide, month);
+    redFooter(slide, month, brandName);
   }
 
   // 23+ Keyword rankings — one readable slide per sheet section (Top 20, All Locations, …)
@@ -919,7 +922,7 @@ export function addSeoSlidesToPptx(pptx: PptxGenJS, data: Record<string, unknown
           italic: true,
         });
       }
-      redFooter(slide, month);
+      redFooter(slide, month, brandName);
     };
 
     if (slidesToRender.length) {
@@ -946,7 +949,7 @@ export function addSeoSlidesToPptx(pptx: PptxGenJS, data: Record<string, unknown
       slide.addText(item.body, { x: x + 0.12, y: y + 0.42, w: 4.3, h: 0.82, fontSize: 9, color: C.slate, valign: 'top' });
     });
     addCompactNotesBox(slide);
-    redFooter(slide, month);
+    redFooter(slide, month, brandName);
   }
 
   sectionSlide(pptx, 'Next Steps & Action Plan', `${client} | ${periodLabel}`);
@@ -965,7 +968,7 @@ export function addSeoSlidesToPptx(pptx: PptxGenJS, data: Record<string, unknown
       slide.addText(`${item.icon || '•'}  ${item.title}`, { x: x + 0.12, y: y + 0.1, w: 4.3, h: 0.22, fontSize: 9, bold: true, color: C.darkGray });
       slide.addText(item.body, { x: x + 0.12, y: y + 0.34, w: 4.3, h: 0.78, fontSize: 7.5, color: C.slate, valign: 'top' });
     });
-    redFooter(slide, month);
+    redFooter(slide, month, brandName);
   }
 
   // 28 Backlinks (Neulife slide 20)
@@ -979,7 +982,7 @@ export function addSeoSlidesToPptx(pptx: PptxGenJS, data: Record<string, unknown
       slide.addText(String(bl.insight), { x: 0.35, y: 1.0, w: 9.3, h: 0.8, fontSize: 9, color: C.slate, valign: 'top' });
     }
     addCompactNotesBox(slide);
-    redFooter(slide, month);
+    redFooter(slide, month, brandName);
   }
 
   sectionSlide(pptx, 'Blog Content', `${client} | ${month}`);
@@ -1056,7 +1059,7 @@ export function addSeoSlidesToPptx(pptx: PptxGenJS, data: Record<string, unknown
       { text: String(post.goal || ''), options: { fontSize: 10, color: C.green } },
     ], { x: padX + 0.14, y: y + 0.1, w: contentW - 0.28, h: goalH - 0.16, valign: 'top', lineSpacing: 14 });
 
-    redFooter(slide, month);
+    redFooter(slide, month, brandName);
   });
 
   // Thank you
@@ -1064,6 +1067,6 @@ export function addSeoSlidesToPptx(pptx: PptxGenJS, data: Record<string, unknown
     const slide = pptx.addSlide();
     slide.background = { color: C.sectionMaroon };
     slide.addText('Thank You!', { x: 0.5, y: 1.6, w: 9, h: 0.8, fontSize: 36, bold: true, color: C.white, align: 'center' });
-    slide.addText(`Client: ${client}\nPeriod: ${periodLabel}\nPrepared by: Chipper Digital`, { x: 0.5, y: 2.6, w: 9, h: 1.5, fontSize: 12, color: C.white, align: 'center' });
+    slide.addText(`Client: ${client}\nPeriod: ${periodLabel}\nPrepared by: ${preparedBy}`, { x: 0.5, y: 2.6, w: 9, h: 1.5, fontSize: 12, color: C.white, align: 'center' });
   }
 }
