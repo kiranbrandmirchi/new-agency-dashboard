@@ -146,7 +146,7 @@ function formatCustomerIdWithDashes(id) {
 
 const TABLES_WITHOUT_DATE = ['gads_campaign_status', 'gads_adgroup_status', 'gads_keyword_status', 'gads_geo_constants', 'gads_conversion_actions'];
 
-export function buildQuery(table, { customerId, customerIds, dateFrom, dateTo, extra, skipDate } = {}) {
+export function buildQuery(table, { customerId, customerIds, dateFrom, dateTo, extra, skipDate, dateColumn = 'date' } = {}) {
   let q = table + '?select=*';
   if (customerIds && Array.isArray(customerIds) && customerIds.length > 0) {
     const seen = new Set();
@@ -177,8 +177,9 @@ export function buildQuery(table, { customerId, customerIds, dateFrom, dateTo, e
     }
   }
   const noDate = skipDate || TABLES_WITHOUT_DATE.includes(table);
-  if (!noDate && dateFrom) q += '&date=gte.' + dateFrom;
-  if (!noDate && dateTo) q += '&date=lte.' + dateTo;
+  const col = dateColumn || 'date';
+  if (!noDate && dateFrom) q += `&${col}=gte.` + dateFrom;
+  if (!noDate && dateTo) q += `&${col}=lte.` + dateTo;
   if (extra) q += extra;
   return q;
 }

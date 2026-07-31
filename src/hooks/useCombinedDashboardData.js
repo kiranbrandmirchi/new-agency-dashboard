@@ -244,99 +244,61 @@ export function useCombinedDashboardData() {
         }
       }
 
-      // Facebook - uses report_date
+      // Facebook / Reddit / TikTok / Bing — report_date; paginate like Google Ads so
+      // high-volume accounts (e.g. WOW) cannot fill the default ~1000-row cap and drop others.
+      const reportDateOrder = '&order=report_date.desc,id.asc';
+      const reportDateOpts = (customerIds, dateFrom, dateTo, extra = '') => ({
+        customerIds, dateFrom, dateTo, dateColumn: 'report_date',
+        extra: reportDateOrder + extra,
+      });
+
       let fbData = [];
       let fbCmp = [];
       if (byPlatform.facebook.length > 0) {
+        const fbPrimary = sbFetchAllParallel(buildQuery('fb_campaign_daily', reportDateOpts(byPlatform.facebook, from, to)));
         if (filters.compareOn && cmpFrom && cmpTo) {
-          const [p, c] = await Promise.all([
-            supabase.from('fb_campaign_daily').select('*')
-              .in('customer_id', byPlatform.facebook)
-              .gte('report_date', from).lte('report_date', to),
-            supabase.from('fb_campaign_daily').select('*')
-              .in('customer_id', byPlatform.facebook)
-              .gte('report_date', cmpFrom).lte('report_date', cmpTo),
-          ]);
-          fbData = p.data || [];
-          fbCmp = c.data || [];
+          const fbCompareQ = sbFetchAllParallel(buildQuery('fb_campaign_daily', reportDateOpts(byPlatform.facebook, cmpFrom, cmpTo)));
+          [fbData, fbCmp] = await Promise.all([safe(fbPrimary), safe(fbCompareQ)]);
         } else {
-          const { data } = await supabase.from('fb_campaign_daily').select('*')
-            .in('customer_id', byPlatform.facebook)
-            .gte('report_date', from).lte('report_date', to);
-          fbData = data || [];
+          fbData = await safe(fbPrimary);
         }
       }
 
-      // Reddit - uses report_date
       let redditData = [];
       let redditCmp = [];
       if (byPlatform.reddit.length > 0) {
+        const redditPrimary = sbFetchAllParallel(buildQuery('reddit_campaign_daily', reportDateOpts(byPlatform.reddit, from, to)));
         if (filters.compareOn && cmpFrom && cmpTo) {
-          const [p, c] = await Promise.all([
-            supabase.from('reddit_campaign_daily').select('*')
-              .in('customer_id', byPlatform.reddit)
-              .gte('report_date', from).lte('report_date', to),
-            supabase.from('reddit_campaign_daily').select('*')
-              .in('customer_id', byPlatform.reddit)
-              .gte('report_date', cmpFrom).lte('report_date', cmpTo),
-          ]);
-          redditData = p.data || [];
-          redditCmp = c.data || [];
+          const redditCompareQ = sbFetchAllParallel(buildQuery('reddit_campaign_daily', reportDateOpts(byPlatform.reddit, cmpFrom, cmpTo)));
+          [redditData, redditCmp] = await Promise.all([safe(redditPrimary), safe(redditCompareQ)]);
         } else {
-          const { data } = await supabase.from('reddit_campaign_daily').select('*')
-            .in('customer_id', byPlatform.reddit)
-            .gte('report_date', from).lte('report_date', to);
-          redditData = data || [];
+          redditData = await safe(redditPrimary);
         }
       }
 
-      // TikTok Ads — same grain as Reddit (`tiktok_campaign_daily`)
       let tiktokData = [];
       let tiktokCmp = [];
       if (byPlatform.tiktok.length > 0) {
+        const tiktokPrimary = sbFetchAllParallel(buildQuery('tiktok_campaign_daily', reportDateOpts(byPlatform.tiktok, from, to)));
         if (filters.compareOn && cmpFrom && cmpTo) {
-          const [p, c] = await Promise.all([
-            supabase.from('tiktok_campaign_daily').select('*')
-              .in('customer_id', byPlatform.tiktok)
-              .gte('report_date', from).lte('report_date', to),
-            supabase.from('tiktok_campaign_daily').select('*')
-              .in('customer_id', byPlatform.tiktok)
-              .gte('report_date', cmpFrom).lte('report_date', cmpTo),
-          ]);
-          tiktokData = p.data || [];
-          tiktokCmp = c.data || [];
+          const tiktokCompareQ = sbFetchAllParallel(buildQuery('tiktok_campaign_daily', reportDateOpts(byPlatform.tiktok, cmpFrom, cmpTo)));
+          [tiktokData, tiktokCmp] = await Promise.all([safe(tiktokPrimary), safe(tiktokCompareQ)]);
         } else {
-          const { data } = await supabase.from('tiktok_campaign_daily').select('*')
-            .in('customer_id', byPlatform.tiktok)
-            .gte('report_date', from).lte('report_date', to);
-          tiktokData = data || [];
+          tiktokData = await safe(tiktokPrimary);
         }
       }
 
-      // Bing / Microsoft Ads — `bing_campaign_daily`. Filter to campaign-grain rows
-      // (ad_group_id = '') so we don't double-count when ad-group rows are also stored.
+      // Bing — campaign-grain only (ad_group_id = '') so ad-group rows are not double-counted.
       let bingData = [];
       let bingCmp = [];
       if (byPlatform.bing.length > 0) {
+        const bingExtra = '&ad_group_id=eq.';
+        const bingPrimary = sbFetchAllParallel(buildQuery('bing_campaign_daily', reportDateOpts(byPlatform.bing, from, to, bingExtra)));
         if (filters.compareOn && cmpFrom && cmpTo) {
-          const [p, c] = await Promise.all([
-            supabase.from('bing_campaign_daily').select('*')
-              .in('customer_id', byPlatform.bing)
-              .eq('ad_group_id', '')
-              .gte('report_date', from).lte('report_date', to),
-            supabase.from('bing_campaign_daily').select('*')
-              .in('customer_id', byPlatform.bing)
-              .eq('ad_group_id', '')
-              .gte('report_date', cmpFrom).lte('report_date', cmpTo),
-          ]);
-          bingData = p.data || [];
-          bingCmp = c.data || [];
+          const bingCompareQ = sbFetchAllParallel(buildQuery('bing_campaign_daily', reportDateOpts(byPlatform.bing, cmpFrom, cmpTo, bingExtra)));
+          [bingData, bingCmp] = await Promise.all([safe(bingPrimary), safe(bingCompareQ)]);
         } else {
-          const { data } = await supabase.from('bing_campaign_daily').select('*')
-            .in('customer_id', byPlatform.bing)
-            .eq('ad_group_id', '')
-            .gte('report_date', from).lte('report_date', to);
-          bingData = data || [];
+          bingData = await safe(bingPrimary);
         }
       }
 
