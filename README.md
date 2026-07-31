@@ -25,6 +25,7 @@ Multi-tenant **marketing analytics and reporting** platform for agencies: connec
 - [Environment variables](#environment-variables)
 - [Available scripts](#available-scripts)
 - [Authentication and authorization](#authentication-and-authorization)
+- [Connecting a platform for a new agency](#connecting-a-platform-for-a-new-agency)
 - [Integrations](#integrations)
 - [Edge Functions API](#edge-functions-api)
 - [Database](#database)
@@ -268,6 +269,36 @@ No `lint`, `test`, or `typecheck` scripts are defined.
 | DB enforcement | RLS + helpers such as `can_access_customer` |
 
 Platform marketing OAuth (`/oauth/callback`) is **separate** from user login.
+
+---
+
+## Connecting a platform for a new agency
+
+You do **not** paste Google Ads / Meta / Bing / Reddit refresh tokens into an agency form. Those platforms use **Connect** (OAuth) in Settings. App secrets (`GADS_*`, `FB_*`, `BING_*`, etc.) stay in **Supabase Edge Function secrets**, not in the UI.
+
+### Steps
+
+1. **Create the agency** — Admin → **Agencies** → Create Agency (super admin).
+2. **Select the agency** — Sidebar agency dropdown (super admin). Settings will prompt if none is selected.
+3. **Open Settings** — Sidebar → **White-Label Settings** (admin / super admin).
+4. **Connect the platform** — Left sub-nav → the platform section → **Connect …** (e.g. Google Ads, Meta, Bing, Reddit, TikTok, GA4).
+5. **Complete OAuth** — Sign in with the provider. For Google Ads you typically enter an **MCC ID**, then **select client accounts** to link.
+6. **Sync** — Still in Settings, sync the linked account(s) (or Sync all where available).
+7. **View data** — Open that platform’s report page with the same agency still selected.
+
+Tokens are stored in Postgres table `agency_platform_credentials`. Linked accounts are `client_platform_accounts`.
+
+### Platform notes
+
+| Platform | In Settings | How you authenticate |
+| --- | --- | --- |
+| Google Ads, Meta, Bing, Reddit, GA4 | Matching left-nav section | **Connect** (OAuth) — no token paste box |
+| TikTok | TikTok Ads | **Connect** (OAuth); also supports pasting a one-time auth code |
+| GoHighLevel | **GHL** | Location **API key** on the account (not OAuth like the ads platforms) |
+
+**White Label & Branding** only sets name/colors/logo — it does not store ad-platform credentials.
+
+Requires `sidebar.settings` and an admin-style role for the platform connect UI. Edge Function secrets for each provider must already be configured on the Supabase project, or Connect will fail before the provider login screen.
 
 ---
 
