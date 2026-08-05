@@ -327,9 +327,9 @@ export function SettingsPage() {
   }, [activeAgency]);
 
   const insertSyncLog = useCallback(async (customerId, chunk, platform = 'google_ads') => {
-    if (!effectiveAgencyId) return;
+    if (!effectiveAgencyId) return { ok: false, error: 'No agency selected' };
     try {
-      await supabase.from('sync_log').insert({
+      const { error } = await supabase.from('sync_log').insert({
         agency_id: effectiveAgencyId,
         platform,
         customer_id: customerId,
@@ -342,8 +342,14 @@ export function SettingsPage() {
         started_at: new Date().toISOString(),
         completed_at: new Date().toISOString(),
       });
+      if (error) {
+        console.warn('[Settings] sync_log insert error:', error);
+        return { ok: false, error: error.message };
+      }
+      return { ok: true };
     } catch (err) {
       console.warn('[Settings] sync_log insert error:', err);
+      return { ok: false, error: err?.message || 'sync_log insert failed' };
     }
   }, [effectiveAgencyId]);
 
@@ -462,6 +468,7 @@ export function SettingsPage() {
       if (!session) { showNotification('Please sign in first.'); return; }
 
       const { dateFrom, dateTo } = getEffectiveDateRange();
+      let logInsertFailed = null;
       const result = await syncWithChunking({
         customerId: account.platform_customer_id,
         agencyId: effectiveAgencyId,
@@ -470,13 +477,26 @@ export function SettingsPage() {
         accessToken: session.access_token,
         chunkDays: 5,
         onProgress: (p) => setSyncProgress({ accountId: account.id, current: p.current, total: p.total, dateFrom: p.dateFrom, dateTo: p.dateTo, status: p.status, rows: p.rows }),
-        onChunkComplete: (chunk) => insertSyncLog(account.platform_customer_id, chunk, 'google_ads'),
+        onChunkComplete: async (chunk) => {
+          const logRes = await insertSyncLog(account.platform_customer_id, chunk, 'google_ads');
+          if (!logRes?.ok && !logInsertFailed) logInsertFailed = logRes?.error || 'Could not save sync history';
+        },
       });
 
+      const syncStatus = result.success ? 'success' : 'error';
+      await supabase.from('client_platform_accounts').update({
+        last_sync_at: new Date().toISOString(),
+        sync_status: syncStatus,
+      }).eq('id', account.id);
+
       if (result.success) {
-        showNotification(`Synced ${account.account_name || account.platform_customer_id}: ${result.totalRows} rows`);
+        showNotification(`Synced ${account.account_name || account.platform_customer_id}: ${result.totalRows} rows (${dateFrom} → ${dateTo})`);
       } else {
-        showNotification(`Sync completed with errors: ${result.totalRows} rows.`);
+        const detail = (result.errors || []).slice(0, 2).join(' · ') || 'see Sync History / Edge Function logs';
+        showNotification(`Sync failed for ${account.account_name || account.platform_customer_id}: ${detail}`);
+      }
+      if (logInsertFailed) {
+        showNotification(`Sync ran but history was not saved (RLS?): ${logInsertFailed}. Apply migration sync_log_super_admin_insert or check Supabase policies.`);
       }
 
       const token = session.access_token;
@@ -517,9 +537,15 @@ export function SettingsPage() {
           accessToken: session.access_token,
           chunkDays: 5,
           onProgress: (p) => setSyncProgress({ accountId: account.id, accountName: account.account_name || account.platform_customer_id, current: p.current, total: p.total, dateFrom: p.dateFrom, dateTo: p.dateTo, status: p.status, rows: p.rows }),
-          onChunkComplete: (chunk) => insertSyncLog(account.platform_customer_id, chunk, 'google_ads'),
+          onChunkComplete: async (chunk) => {
+            await insertSyncLog(account.platform_customer_id, chunk, 'google_ads');
+          },
         });
         totalRowsAll += result.totalRows;
+        await supabase.from('client_platform_accounts').update({
+          last_sync_at: new Date().toISOString(),
+          sync_status: result.success ? 'success' : 'error',
+        }).eq('id', account.id);
         const token = session.access_token;
         try { await syncStatusAndGeo({ customerId: account.platform_customer_id, accessToken: token }); } catch (e) {}
         await fetchSyncLogs(account.platform_customer_id, 'google_ads');
@@ -1473,7 +1499,7 @@ export function SettingsPage() {
                                   <p style={{ color: 'var(--text-muted)', fontSize: 12, margin: 0 }}>No sync history yet.</p>
                                 ) : (
                                   <table className="data-table" style={{ fontSize: 12 }}>
-                                    <thead><tr><th>Date Range</th><th>Status</th><th>Rows</th><th>Time</th></tr></thead>
+                                    <thead><tr><th>Date Range</th><th>Status</th><th>Rows</th><th>Time</th><th>Error</th></tr></thead>
                                     <tbody>
                                       {logs.map((log) => (
                                         <tr key={log.id}>
@@ -1481,6 +1507,9 @@ export function SettingsPage() {
                                           <td><span className={`badge ${statusBadge(log.status)}`}>{log.status}</span></td>
                                           <td>{log.rows_synced ?? 0}</td>
                                           <td>{log.started_at ? new Date(log.started_at).toLocaleString() : '—'}</td>
+                                          <td style={{ maxWidth: 360, wordBreak: 'break-word', color: log.error_message ? 'var(--danger, #b91c1c)' : 'var(--text-muted)' }}>
+                                            {log.error_message || '—'}
+                                          </td>
                                         </tr>
                                       ))}
                                     </tbody>

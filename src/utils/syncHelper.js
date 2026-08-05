@@ -2,6 +2,9 @@
  * Splits a date range into chunks of `chunkDays` and calls the sync function
  * for each chunk sequentially. Returns progress updates via callback.
  *
+ * gads-full-sync returns text/plain log lines (not JSON). Soft API failures often
+ * still use HTTP 200 with "ERR …" / "ERROR:" lines in the body.
+ *
  * @param {Object} params
  * @param {string} params.customerId - platform_customer_id
  * @param {string} params.agencyId
@@ -10,7 +13,7 @@
  * @param {string} params.accessToken - Supabase session token
  * @param {number} params.chunkDays - days per chunk (default 5)
  * @param {function} params.onProgress - callback({current, total, dateFrom, dateTo, status, rows})
- * @param {function} params.onChunkComplete - optional callback(chunkResult) for logging to sync_log
+ * @param {function} params.onChunkComplete - optional async callback(chunkResult) for logging to sync_log
  * @returns {Promise<{success: boolean, totalRows: number, errors: string[]}>}
  */
 export async function syncWithChunking(params) {
@@ -70,31 +73,36 @@ export async function syncWithChunking(params) {
         }),
       });
 
-      const data = await res.json().catch(() => null);
-      const rows = data?.total_rows ?? data?.log?.length ?? 0;
-      totalRows += rows;
+      const rawText = await res.text();
+      let data = null;
+      try {
+        data = rawText ? JSON.parse(rawText) : null;
+      } catch {
+        data = null;
+      }
+
+      const parsed = parseGadsSyncBody(rawText, data, res.ok);
+      totalRows += parsed.rows;
 
       const chunkResult = {
         dateFrom: fromStr,
         dateTo: toStr,
-        status: res.ok ? 'success' : 'failed',
-        rowsSynced: rows,
-        errorMessage: null,
+        status: parsed.ok ? 'success' : 'failed',
+        rowsSynced: parsed.rows,
+        errorMessage: parsed.errorMessage,
       };
 
-      if (!res.ok) {
-        const errMsg = data?.error || data?.message || await res.text().catch(() => 'Sync failed');
-        chunkResult.errorMessage = errMsg;
-        errors.push(`${fromStr}–${toStr}: ${errMsg}`);
+      if (!parsed.ok) {
+        errors.push(`${fromStr}–${toStr}: ${parsed.errorMessage || 'Sync failed'}`);
         onProgress?.({
           current: i + 1,
           total,
           dateFrom: fromStr,
           dateTo: toStr,
           status: 'failed',
-          rows,
+          rows: parsed.rows,
         });
-        onChunkComplete?.({ customerId, agencyId, ...chunkResult });
+        await onChunkComplete?.({ customerId, agencyId, ...chunkResult });
         continue;
       }
 
@@ -104,9 +112,9 @@ export async function syncWithChunking(params) {
         dateFrom: fromStr,
         dateTo: toStr,
         status: 'success',
-        rows,
+        rows: parsed.rows,
       });
-      onChunkComplete?.({ customerId, agencyId, ...chunkResult });
+      await onChunkComplete?.({ customerId, agencyId, ...chunkResult });
     } catch (err) {
       const errMsg = err?.message || 'Network error';
       errors.push(`${fromStr}–${toStr}: ${errMsg}`);
@@ -118,7 +126,15 @@ export async function syncWithChunking(params) {
         status: 'failed',
         rows: 0,
       });
-      onChunkComplete?.({ customerId, agencyId, dateFrom: fromStr, dateTo: toStr, status: 'failed', rowsSynced: 0, errorMessage: errMsg });
+      await onChunkComplete?.({
+        customerId,
+        agencyId,
+        dateFrom: fromStr,
+        dateTo: toStr,
+        status: 'failed',
+        rowsSynced: 0,
+        errorMessage: errMsg,
+      });
     }
   }
 
@@ -127,6 +143,45 @@ export async function syncWithChunking(params) {
     totalRows,
     errors,
   };
+}
+
+/** Parse gads-full-sync JSON or text/plain log body. */
+function parseGadsSyncBody(rawText, data, httpOk) {
+  if (data && typeof data === 'object') {
+    const rows = data.total_rows ?? data.log?.length ?? 0;
+    if (!httpOk) {
+      return {
+        ok: false,
+        rows: 0,
+        errorMessage: data.error || data.message || rawText?.slice(0, 500) || 'Sync failed',
+      };
+    }
+    return { ok: true, rows, errorMessage: null };
+  }
+
+  const text = String(rawText || '');
+  const hardErr = text.match(/^(ERROR:|FATAL:).+$/m);
+  const softErrs = text.match(/^ERR .+$/gm) || [];
+  let rows = 0;
+  for (const m of text.matchAll(/OK:\s*(\d+)/g)) {
+    rows += Number(m[1]) || 0;
+  }
+
+  if (!httpOk || hardErr) {
+    return {
+      ok: false,
+      rows,
+      errorMessage: (hardErr?.[0] || softErrs[0] || text.slice(0, 500) || 'Sync failed').trim(),
+    };
+  }
+  if (softErrs.length > 0) {
+    return {
+      ok: false,
+      rows,
+      errorMessage: softErrs.join(' | ').slice(0, 1000),
+    };
+  }
+  return { ok: true, rows, errorMessage: null };
 }
 
 /**
