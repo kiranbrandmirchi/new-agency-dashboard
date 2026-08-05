@@ -68,6 +68,12 @@ function fmtRangeUsShort(fromStr, toStr) {
 
 function num(v) { return Number(v) || 0; }
 
+/** Match Google Ads / Bing IDs whether stored with or without dashes. */
+function normalizeAdsCustomerId(id) {
+  if (id == null || id === '') return '';
+  return String(id).replace(/-/g, '');
+}
+
 /** Match GA4 Basic / sync: DB stores numeric property id; CPA may use `properties/123`. */
 function normalizeGa4PropertyId(id) {
   if (id == null || id === '') return '';
@@ -75,6 +81,12 @@ function normalizeGa4PropertyId(id) {
   const lower = s.toLowerCase();
   if (lower.startsWith('properties/')) s = s.slice(11);
   return s.trim();
+}
+
+function accountLookupKey(platform, customerId) {
+  if (platform === 'google_ads' || platform === 'bing') return normalizeAdsCustomerId(customerId);
+  if (platform === 'ga4') return normalizeGa4PropertyId(customerId) || String(customerId);
+  return String(customerId);
 }
 
 export function useCombinedDashboardData() {
@@ -179,6 +191,9 @@ export function useCombinedDashboardData() {
         accMap.set(raw, info);
         if (a.platform === 'ga4') {
           const norm = normalizeGa4PropertyId(raw);
+          if (norm && norm !== raw) accMap.set(norm, info);
+        } else if (a.platform === 'google_ads' || a.platform === 'bing') {
+          const norm = normalizeAdsCustomerId(raw);
           if (norm && norm !== raw) accMap.set(norm, info);
         }
       });
@@ -344,24 +359,34 @@ export function useCombinedDashboardData() {
   }, [scopeAgencyId, allowedClientAccounts]);
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // Aggregate helper: raw rows -> account-level breakdown
-  function aggregateByAccount(rows, platform, costField, dateField) {
+  // Aggregate helper: raw rows -> account-level breakdown.
+  // Always include linked CPA accounts for the platform (zeros when no rows in range),
+  // so Sync Now / Settings-linked accounts still appear on the Dashboard.
+  function aggregateByAccount(rows, platform) {
     const byAcc = new Map();
+
+    const ensure = (customerId) => {
+      const key = accountLookupKey(platform, customerId);
+      if (!key) return null;
+      if (byAcc.has(key)) return byAcc.get(key);
+      const info = accountMap.get(String(customerId)) || accountMap.get(key);
+      const entry = {
+        customer_id: key,
+        platform,
+        account_name: info?.account_name || String(customerId),
+        client_name: info?.client_name || '',
+        client_id: info?.client_id ?? null,
+        cost: 0, clicks: 0, impressions: 0, conversions: 0,
+        reach: 0, sessions: 0, total_users: 0, page_views: 0,
+        purchase_count: 0, purchase_value: 0, lead_count: 0,
+      };
+      byAcc.set(key, entry);
+      return entry;
+    };
+
     rows.forEach((r) => {
-      const cid = String(r.customer_id);
-      const info = accountMap.get(cid);
-      if (!byAcc.has(cid)) {
-        byAcc.set(cid, {
-          customer_id: cid, platform,
-          account_name: info?.account_name || cid,
-          client_name: info?.client_name || '',
-          client_id: info?.client_id ?? null,
-          cost: 0, clicks: 0, impressions: 0, conversions: 0,
-          reach: 0, sessions: 0, total_users: 0, page_views: 0,
-          purchase_count: 0, purchase_value: 0, lead_count: 0,
-        });
-      }
-      const a = byAcc.get(cid);
+      const a = ensure(r.customer_id);
+      if (!a) return;
 
       if (platform === 'google_ads') {
         a.cost += num(r.cost); a.clicks += num(r.clicks); a.impressions += num(r.impressions); a.conversions += num(r.conversions);
@@ -391,6 +416,17 @@ export function useCombinedDashboardData() {
         a._dur_w = (a._dur_w || 0) + num(r.avg_session_duration) * s;
       }
     });
+
+    // Seed linked accounts that have no metric rows in the selected range.
+    const seenInfo = new Set();
+    accountMap.forEach((info, id) => {
+      if (info.platform !== platform) return;
+      const key = accountLookupKey(platform, id);
+      if (!key || seenInfo.has(key)) return;
+      seenInfo.add(key);
+      ensure(id);
+    });
+
     return [...byAcc.values()].map((a) => {
       const base = {
         ...a,
@@ -414,7 +450,7 @@ export function useCombinedDashboardData() {
   function aggregateCampaigns(rows, platform) {
     const map = new Map();
     rows.forEach((r) => {
-      const cid = String(r.customer_id);
+      const cid = accountLookupKey(platform, r.customer_id);
       const campId = r.campaign_id;
       const key = `${cid}::${campId}`;
       if (!map.has(key)) map.set(key, { customer_id: cid, campaign_id: campId, campaign_name: r.campaign_name, cost: 0, clicks: 0, impressions: 0, conversions: 0 });
