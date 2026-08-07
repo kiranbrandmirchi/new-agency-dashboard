@@ -24,6 +24,7 @@ All times are **UTC**. IST = UTC + 5:30.
 | **GA4** | `ga4-daily-metrics` | `ga4_metrics_sync_all()` | `ga4-sync` | `ga4_daily_summary` / GA4 raw/summary stores |
 | **GoHighLevel** | `ghl-sync-daily` | `ghl_sync_all()` | `ghl-sync` | `ghl_contacts`, `ghl_calls`, `ghl_*_daily`, etc. |
 | **Hoot inventory** | `hoot-daily-inventory-sync` | `hoot_inventory_sync_all()` | `hoot-inventory-sync` | `hoot_inventory`, feed-related tables |
+| **Sync health alerts** | `sync-health-check-daily` | `net.http_post` (inline) | `sync-health-check` | Email digest + `sync_alert_log` (no metric writes) |
 
 Dashboard / report pages **read** these tables; they do not call the ad APIs directly for historical sync.
 
@@ -44,8 +45,9 @@ Dashboard / report pages **read** these tables; they do not call the ad APIs dir
 | 05:40 | 11:10 | `bing_metrics_sync_all` | Bing |
 | 05:45 | 11:15 | `ga4-daily-metrics` | GA4 |
 | 06:00 | 11:30 | `ghl-sync-daily` | GoHighLevel |
+| 07:30 | 13:00 | `sync-health-check-daily` | **Zero-fetch email alerts** (all ad/GA4 platforms) |
 
-**Total: 11 active jobs.**
+**Total: 12 active jobs** (11 sync + 1 health check), once `sync-health-check-daily` is applied.
 
 ---
 
@@ -205,6 +207,78 @@ Not an ad-platform spend sync; inventory only.
 
 ---
 
+## Sync health alerts — `sync-health-check-daily`
+
+Emails ops when **recently active** accounts have **no metric rows for yesterday** after the nightly sync window.
+
+| | |
+| --- | --- |
+| **Schedule** | `30 7 * * *` UTC (after GHL at 06:00) |
+| **Command** | `net.http_post` → `/functions/v1/sync-health-check` |
+| **Detection RPC** | `find_sync_zero_fetch_accounts(p_check_date)` |
+| **Log table** | `sync_alert_log` (dedupe per agency / platform / customer / day) |
+| **Platforms** | Google Ads, Meta (`facebook`), Bing, Reddit, TikTok, GA4 |
+| **Skipped (v1)** | Hoot, GHL |
+
+### Alert rule
+
+For each **active** `client_platform_accounts` row on a covered platform, alert if:
+
+1. **No rows** in that platform’s daily table for **yesterday** (`CURRENT_DATE - 1`), **and**
+2. The account had **≥1 row in the prior 14 days** (was producing data recently).
+
+Idle linked accounts with no recent history are ignored.
+
+| Platform | Fact table | Date column |
+| --- | --- | --- |
+| google_ads | `gads_campaign_daily` | `date` |
+| facebook | `fb_campaign_daily` | `report_date` |
+| bing | `bing_campaign_daily` | `report_date` |
+| reddit | `reddit_campaign_daily` | `report_date` |
+| tiktok | `tiktok_campaign_daily` | `report_date` |
+| ga4 | `ga4_daily_summary` | `report_date` |
+
+### Required secrets
+
+| Secret | Where | Purpose |
+| --- | --- | --- |
+| `RESEND_API_KEY` | Edge Function secrets | Send digest via [Resend](https://resend.com) |
+| `ALERT_FROM` | Edge Function secrets | Verified sender, e.g. `alerts@yourdomain.com` |
+| `ALERT_TO` | Edge Function secrets | One or more recipients, comma-separated |
+| `ALERT_ALWAYS` | Edge Function secrets (optional) | If `true`, email even when there are no anomalies |
+| `CRON_SECRET` | Edge Function secrets (optional) | Extra Bearer token allowed for invokes |
+| Vault `project_url` | Supabase Vault | Cron HTTP URL base |
+| Vault `anon_key` or `service_role_key` | Supabase Vault | Cron `Authorization` Bearer (function accepts both) |
+
+Migration: [`supabase/migrations/20260807153000_sync_health_check_alerts.sql`](../supabase/migrations/20260807153000_sync_health_check_alerts.sql)  
+Edge Function: [`supabase/functions/sync-health-check/`](../supabase/functions/sync-health-check/)
+
+### Manual test
+
+```bash
+# Dry run (no email, no log insert)
+curl -X POST "$SUPABASE_URL/functions/v1/sync-health-check" \
+  -H "Authorization: Bearer $SERVICE_ROLE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"dry_run": true}'
+
+# Real run for a specific date
+curl -X POST "$SUPABASE_URL/functions/v1/sync-health-check" \
+  -H "Authorization: Bearer $SERVICE_ROLE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"check_date": "2026-08-06"}'
+```
+
+```sql
+-- Preview anomalies without emailing
+SELECT * FROM public.find_sync_zero_fetch_accounts(CURRENT_DATE - 1);
+
+-- Recent alerts
+SELECT * FROM public.sync_alert_log ORDER BY alerted_at DESC LIMIT 50;
+```
+
+---
+
 ## Manual sync vs cron
 
 | Action | Same Edge Function as cron? | Typical use |
@@ -241,6 +315,8 @@ Edge Function logs (Supabase Dashboard → Edge Functions → e.g. `gads-full-sy
 | Path | Role |
 | --- | --- |
 | [`supabase/Cron-jobs.json`](../supabase/Cron-jobs.json) | Partial checked-in job list (may lag production) |
+| [`supabase/migrations/20260807153000_sync_health_check_alerts.sql`](../supabase/migrations/20260807153000_sync_health_check_alerts.sql) | `sync_alert_log`, detection RPC, health-check cron |
+| [`supabase/functions/sync-health-check/`](../supabase/functions/sync-health-check/) | Zero-fetch email digest |
 | `schema.sql` / `supabase/full_schema.sql` | SQL `*_sync_all` function definitions |
 | `supabase/migrations/20260504120100_bing_metrics_sync_all.sql` | Bing cron driver + schedule |
 | `supabase/functions/*-full-sync/` / `gads-full-sync/` / `ga4-sync/` / `ghl-sync/` | Platform fetch + upsert logic |

@@ -33,5 +33,12 @@
     "command": "SELECT public.bing_metrics_sync_all()",
     "database": "postgres",
     "active": true
+  },
+  {
+    "jobname": "sync-health-check-daily",
+    "schedule": "30 7 * * *",
+    "command": "SELECT net.http_post(\n  url := (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'project_url')\n         || '/functions/v1/sync-health-check',\n  headers := jsonb_build_object(\n    'Content-Type', 'application/json',\n    'Authorization', 'Bearer ' || COALESCE(\n      (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'service_role_key'),\n      (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'anon_key')\n    )\n  ),\n  body := '{}'::jsonb\n);",
+    "database": "postgres",
+    "active": true
   }
 ]
