@@ -451,6 +451,7 @@ Extended drafts used to assemble this README:
 
 | Document | Contents |
 | --- | --- |
+| [`docs/cron-jobs.md`](docs/cron-jobs.md) | pg_cron jobs by platform (Google / Meta / Bing / …) |
 | [`docs/readme-work/00-project-analysis.md`](docs/readme-work/00-project-analysis.md) | Full repository analysis |
 | [`docs/readme-work/01-project-overview.md`](docs/readme-work/01-project-overview.md) | Product overview |
 | [`docs/readme-work/02-installation.md`](docs/readme-work/02-installation.md) | Install & env |
