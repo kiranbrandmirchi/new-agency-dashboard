@@ -23,6 +23,8 @@ import { GhlLeadsPage } from './pages/GhlLeadsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
 import { PptReportPage } from './pages/PptReportPage';
+import { GoogleAdsTestPage } from './pages/GoogleAdsTestPage';
+import { GoogleDataPage } from './pages/GoogleDataPage';
 import { Admin } from './pages/Admin';
 
 const PLACEHOLDER_PAGES = {
@@ -55,6 +57,8 @@ function CurrentPage() {
   if (currentPage === 'ga4' || currentPage === 'ga4-advanced') return <GA4Page />;
   if (currentPage === 'ghl') return <GhlLeadsPage />;
   if (currentPage === 'settings') return <SettingsPage />;
+  if (currentPage === 'google-ads-test') return <GoogleAdsTestPage />;
+  if (currentPage === 'google-data') return <GoogleDataPage />;
 
   const config = PLACEHOLDER_PAGES[currentPage];
   if (config) {
@@ -86,6 +90,8 @@ const DashboardLayoutContent = React.memo(function DashboardLayoutContent({ curr
 
 const PATH_TO_PAGE = {
   '/ppt-report': 'ppt-report',
+  '/google-ads-test': 'google-ads-test',
+  '/google-data': 'google-data',
 };
 
 function DashboardLayout() {
@@ -131,6 +137,7 @@ function DashboardLayout() {
 
 function LoginRedirect({ children }) {
   const { isAuthenticated, loading } = useAuth();
+  const location = useLocation();
   if (loading) {
     return (
       <div className="auth-page">
@@ -142,7 +149,9 @@ function LoginRedirect({ children }) {
     );
   }
   if (isAuthenticated) {
-    return <Navigate to="/" replace />;
+    const from = location.state?.from;
+    const returnTo = from?.pathname && from.pathname !== '/login' ? `${from.pathname}${from.search || ''}` : '/';
+    return <Navigate to={returnTo} replace />;
   }
   return children;
 }
@@ -174,6 +183,16 @@ export default function App() {
           </ProtectedRoute>
         } />
         <Route path="/ppt-report" element={
+          <ProtectedRoute>
+            <DashboardLayout />
+          </ProtectedRoute>
+        } />
+        <Route path="/google-ads-test" element={
+          <ProtectedRoute>
+            <DashboardLayout />
+          </ProtectedRoute>
+        } />
+        <Route path="/google-data" element={
           <ProtectedRoute>
             <DashboardLayout />
           </ProtectedRoute>

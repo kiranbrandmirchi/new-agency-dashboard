@@ -33,7 +33,19 @@ Deno.serve(async (req)=>{
       })
     });
     const credRows = await credRes.json();
-    if (!credRows || credRows.length === 0 || !credRows[0].refresh_token) {
+    // Prefer the verified-app connection (tokens do not expire after 7 days) when it owns this account.
+    const vRes = await fetch(SB_URL + "/rest/v1/google_ads_temp_accounts?" + "customer_id=eq." + customerId + "&select=connection_id,google_ads_temp_connections!inner(refresh_token,mcc_id,is_active)" + "&google_ads_temp_connections.is_active=eq.true&limit=1", {
+      headers: {
+        "apikey": SB_KEY,
+        "Authorization": "Bearer " + SB_KEY
+      }
+    });
+    const vRows = await vRes.json().catch(()=>[]);
+    const vConn = Array.isArray(vRows) ? vRows[0]?.google_ads_temp_connections : null;
+    const vId = Deno.env.get("GADS_TEST_CLIENT_ID") || "";
+    const vSecret = Deno.env.get("GADS_TEST_CLIENT_SECRET") || "";
+    const useVerified = !!(vConn?.refresh_token && vId && vSecret);
+    if (!useVerified && (!credRows || credRows.length === 0 || !credRows[0].refresh_token)) {
       log("ERROR: No credential for " + customerId);
       return new Response(L.join("\n"), {
         status: 400,
@@ -42,8 +54,11 @@ Deno.serve(async (req)=>{
         }
       });
     }
-    const REFRESH_TOK = credRows[0].refresh_token;
-    const MCC_ID = (credRows[0].mcc_id || "").replace(/-/g, "");
+    const REFRESH_TOK = useVerified ? vConn.refresh_token : credRows[0].refresh_token;
+    const MCC_ID = String(useVerified ? vConn.mcc_id || "" : credRows[0].mcc_id || "").replace(/-/g, "");
+    const CLIENT_ID = useVerified ? vId : CI;
+    const CLIENT_SECRET = useVerified ? vSecret : CS;
+    log("Credential source: " + (useVerified ? "verified app" : "legacy app"));
     // --- OAuth ---
     const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
@@ -52,8 +67,8 @@ Deno.serve(async (req)=>{
       },
       body: new URLSearchParams({
         grant_type: "refresh_token",
-        client_id: CI,
-        client_secret: CS,
+        client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET,
         refresh_token: REFRESH_TOK
       })
     });

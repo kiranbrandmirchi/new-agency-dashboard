@@ -57,6 +57,8 @@ Deno.serve(async (req)=>{
     log("Mode: " + mode + " | listOnly: " + listOnly);
     // --- Get credential from database ---
     let REFRESH_TOK = "";
+    let CLIENT_ID = CI;
+    let CLIENT_SECRET = CS;
     let MCC_ID = "";
     let USE_MCC = true;
     if (customerId && !listOnly) {
@@ -73,20 +75,39 @@ Deno.serve(async (req)=>{
       }
       const agencyId = cpaRows[0].agency_id;
       USE_MCC = cpaRows[0].use_mcc !== false; // default true
-      const agencyCredRes = await fetch(SB_URL + "/rest/v1/agency_platform_credentials?" + "agency_id=eq." + agencyId + "&platform=eq.google_ads&is_active=eq.true" + "&select=oauth_refresh_token,platform_mcc_id", {
+      // Prefer the verified-app connection (tokens do not expire after 7 days) when it owns this account.
+      const vRes = await fetch(SB_URL + "/rest/v1/google_ads_temp_accounts?" + "customer_id=eq." + String(customerId).replace(/-/g, "") + "&select=connection_id,google_ads_temp_connections!inner(refresh_token,mcc_id,is_active)" + "&google_ads_temp_connections.is_active=eq.true&limit=1", {
         headers: {
           "apikey": SB_KEY,
           "Authorization": "Bearer " + SB_KEY
         }
       });
-      const agencyCreds = await agencyCredRes.json();
-      if (!agencyCreds || agencyCreds.length === 0 || !agencyCreds[0].oauth_refresh_token) {
-        log("ERROR: No credential for agency " + agencyId);
-        return textResponse(L.join("\n"), 400);
+      const vRows = await vRes.json().catch(()=>[]);
+      const vConn = Array.isArray(vRows) ? vRows[0]?.google_ads_temp_connections : null;
+      const vId = Deno.env.get("GADS_TEST_CLIENT_ID") || "";
+      const vSecret = Deno.env.get("GADS_TEST_CLIENT_SECRET") || "";
+      if (vConn?.refresh_token && vId && vSecret) {
+        REFRESH_TOK = vConn.refresh_token;
+        MCC_ID = String(vConn.mcc_id || "").replace(/-/g, "");
+        CLIENT_ID = vId;
+        CLIENT_SECRET = vSecret;
+        log("Credential found via verified app. MCC: " + MCC_ID + " | use_mcc: " + USE_MCC);
+      } else {
+        const agencyCredRes = await fetch(SB_URL + "/rest/v1/agency_platform_credentials?" + "agency_id=eq." + agencyId + "&platform=eq.google_ads&is_active=eq.true" + "&select=oauth_refresh_token,platform_mcc_id", {
+          headers: {
+            "apikey": SB_KEY,
+            "Authorization": "Bearer " + SB_KEY
+          }
+        });
+        const agencyCreds = await agencyCredRes.json();
+        if (!agencyCreds || agencyCreds.length === 0 || !agencyCreds[0].oauth_refresh_token) {
+          log("ERROR: No credential for agency " + agencyId);
+          return textResponse(L.join("\n"), 400);
+        }
+        REFRESH_TOK = agencyCreds[0].oauth_refresh_token;
+        MCC_ID = (agencyCreds[0].platform_mcc_id || "").replace(/-/g, "");
+        log("Credential found via agency (legacy app). MCC: " + MCC_ID + " | use_mcc: " + USE_MCC);
       }
-      REFRESH_TOK = agencyCreds[0].oauth_refresh_token;
-      MCC_ID = (agencyCreds[0].platform_mcc_id || "").replace(/-/g, "");
-      log("Credential found via agency. MCC: " + MCC_ID + " | use_mcc: " + USE_MCC);
     } else if (listOnly) {
       if (!body.agency_id) {
         log("ERROR: agency_id required for list_only");
@@ -114,8 +135,8 @@ Deno.serve(async (req)=>{
         "Content-Type": "application/x-www-form-urlencoded"
       },
       body: new URLSearchParams({
-        client_id: CI,
-        client_secret: CS,
+        client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET,
         refresh_token: REFRESH_TOK,
         grant_type: "refresh_token"
       })

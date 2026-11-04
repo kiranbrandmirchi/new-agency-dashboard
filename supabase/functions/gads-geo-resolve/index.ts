@@ -19,7 +19,19 @@ Deno.serve(async (req)=>{
       }
     });
     const creds = await credRes.json();
-    if (!creds || creds.length === 0 || !creds[0].oauth_refresh_token) {
+    // Prefer an active verified-app connection (tokens do not expire after 7 days).
+    const vRes = await fetch(SB_URL + "/rest/v1/google_ads_temp_connections?is_active=eq.true&token_status=eq.ok&limit=1&select=refresh_token,mcc_id", {
+      headers: {
+        "apikey": SB_KEY,
+        "Authorization": "Bearer " + SB_KEY
+      }
+    });
+    const vRows = await vRes.json().catch(()=>[]);
+    const vConn = Array.isArray(vRows) ? vRows[0] : null;
+    const vId = Deno.env.get("GADS_TEST_CLIENT_ID") || "";
+    const vSecret = Deno.env.get("GADS_TEST_CLIENT_SECRET") || "";
+    const useVerified = !!(vConn?.refresh_token && vId && vSecret);
+    if (!useVerified && (!creds || creds.length === 0 || !creds[0].oauth_refresh_token)) {
       log("ERROR: No active Google Ads credential");
       return new Response(L.join("\n"), {
         status: 400,
@@ -28,16 +40,18 @@ Deno.serve(async (req)=>{
         }
       });
     }
-    const REFRESH_TOK = creds[0].oauth_refresh_token;
-    const MCC = (creds[0].platform_mcc_id || "").replace(/-/g, "");
+    const REFRESH_TOK = useVerified ? vConn.refresh_token : creds[0].oauth_refresh_token;
+    const MCC = String(useVerified ? vConn.mcc_id || "" : creds[0].platform_mcc_id || "").replace(/-/g, "");
+    const CLIENT_ID = useVerified ? vId : CI;
+    const CLIENT_SECRET = useVerified ? vSecret : CS;
     const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded"
       },
       body: new URLSearchParams({
-        client_id: CI,
-        client_secret: CS,
+        client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET,
         refresh_token: REFRESH_TOK,
         grant_type: "refresh_token"
       })

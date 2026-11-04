@@ -26,15 +26,16 @@ export const Sidebar = React.memo(function Sidebar() {
     [activeAgencyId, agencyId],
   );
 
+  const isSuperAdmin = userProfile?.is_super_admin || userRole?.toLowerCase() === 'super_admin';
   const sections = useMemo(() => {
     const allowed = NAV_ITEMS.filter((item) => {
       if (!hasPermission(item.permission)) return false;
       if (item.wheelerOnlyGa4 && !isWheelerGa4Agency) return false;
+      if (item.superAdminOnly && !isSuperAdmin) return false;
       return true;
     });
     return groupBySection(allowed);
-  }, [hasPermission, isWheelerGa4Agency]);
-  const isSuperAdmin = userProfile?.is_super_admin || userRole?.toLowerCase() === 'super_admin';
+  }, [hasPermission, isWheelerGa4Agency, isSuperAdmin]);
   const isAdmin = location.pathname === '/admin';
 
   const sidebarClass = ['sidebar', sidebarOpen && 'open', sidebarCollapsed && 'collapsed'].filter(Boolean).join(' ');
@@ -88,7 +89,7 @@ export const Sidebar = React.memo(function Sidebar() {
                       e.preventDefault();
                       if (item.route) {
                         navigate(item.route);
-                      } else if (location.pathname === '/admin' || location.pathname === '/ppt-report') {
+                      } else if (location.pathname !== '/') {
                         navigate('/');
                       }
                       showPage(item.id);

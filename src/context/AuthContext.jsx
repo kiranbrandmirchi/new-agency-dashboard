@@ -56,6 +56,7 @@ export function AuthProvider({ children }) {
   // onAuthStateChange triggers on tab focus / network resume, which were the
   // source of the "Failed to load profile" bounce-outs on transient errors.
   const profileLoadedForUser = useRef(null);
+  const profileLoadInFlight = useRef(null);
   const activeAgencyIdRef = useRef(null);
   const PROFILE_LOAD_DEBOUNCE_MS = 2000;
 
@@ -120,17 +121,28 @@ export function AuthProvider({ children }) {
       setProfileLoaded(true);
       return;
     }
+    // Another load for this user is already running; it will set profileLoaded when done.
+    if (profileLoadInFlight.current === userId) return;
     const now = Date.now();
     if (lastProfileLoad.current.userId === userId && now - lastProfileLoad.current.at < PROFILE_LOAD_DEBOUNCE_MS) {
       setProfileLoaded(true);
       return;
     }
     lastProfileLoad.current = { userId, at: now };
+    profileLoadInFlight.current = userId;
     try {
-      const { data: profile, error: profileErr } = await withTimeout(
+      const fetchProfile = () => withTimeout(
         supabase.from('user_profiles').select('*, agencies(*), roles(*)').eq('id', userId).single(),
         SUPABASE_TIMEOUT_MS
       );
+      let { data: profile, error: profileErr } = await fetchProfile();
+      // PGRST116 = no profile row. Anything else is transient (network, token refresh race): retry once.
+      if (profileErr && profileErr.code !== 'PGRST116') {
+        console.warn('[Auth] user_profiles error, retrying:', profileErr);
+        await new Promise((r) => setTimeout(r, 800));
+        ({ data: profile, error: profileErr } = await fetchProfile());
+        if (profileErr && profileErr.code !== 'PGRST116') throw profileErr;
+      }
       if (profileErr || !profile) {
         console.warn('[Auth] user_profiles error:', profileErr);
         if (authUser) {
@@ -289,6 +301,8 @@ export function AuthProvider({ children }) {
       }
       setAuthError('Failed to load profile. Try refreshing.');
       setProfileLoaded(true);
+    } finally {
+      if (profileLoadInFlight.current === userId) profileLoadInFlight.current = null;
     }
   }, []);
 
@@ -435,6 +449,7 @@ export function AuthProvider({ children }) {
     let mounted = true;
 
     withTimeout(supabase.auth.getSession(), SUPABASE_TIMEOUT_MS)
+      .catch(() => withTimeout(supabase.auth.getSession(), SUPABASE_TIMEOUT_MS))
       .then(({ data: { session: s } }) => {
         if (!mounted) return;
         if (s) {
@@ -459,7 +474,8 @@ export function AuthProvider({ children }) {
       if (s) {
         setAuthError(null);
         if (event !== 'TOKEN_REFRESHED') {
-          loadUserProfile(s.user?.id, s.user);
+          // Deferred: Supabase queries issued inside this callback can deadlock on the auth lock.
+          setTimeout(() => loadUserProfile(s.user?.id, s.user), 0);
         }
       } else {
         lastProfileLoad.current = { userId: null, at: 0 };
@@ -502,6 +518,8 @@ export function AuthProvider({ children }) {
   const signIn = useCallback(async (email, password) => {
     setAuthError(null);
     try {
+      profileLoadedForUser.current = null;
+      lastProfileLoad.current = { userId: null, at: 0 };
       const { data, error } = await withTimeout(
         supabase.auth.signInWithPassword({
           email: String(email).trim(),
@@ -510,14 +528,16 @@ export function AuthProvider({ children }) {
         SUPABASE_TIMEOUT_MS
       );
       if (error) return { success: false, error: error.message };
+      setLoading(true);
+      setProfileLoaded(false);
       setSession(data.session);
       setUser(data.user);
-      setLoading(true);
+      await loadUserProfile(data.user?.id, data.user);
       return { success: true };
     } catch (err) {
       return { success: false, error: err.message || 'Cannot reach authentication server.' };
     }
-  }, []);
+  }, [loadUserProfile]);
 
   const signUp = useCallback(async (email, password, fullName = '') => {
     setAuthError(null);
@@ -542,7 +562,8 @@ export function AuthProvider({ children }) {
   }, []);
 
   const signOut = useCallback(async () => {
-    await supabase.auth.signOut();
+    // 'local' ends only this browser's session; the default 'global' logs the user out everywhere.
+    await supabase.auth.signOut({ scope: 'local' });
     profileLoadedForUser.current = null;
     lastProfileLoad.current = { userId: null, at: 0 };
     setSession(null);

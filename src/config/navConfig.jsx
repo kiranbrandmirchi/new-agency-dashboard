@@ -107,4 +107,13 @@ export const NAV_ITEMS = [
   { id: 'creatives', label: 'Creative Analysis',     icon: '🎨', section: 'Insights', permission: 'sidebar.creatives' },
   { id: 'events',    label: 'Events / Special',      icon: '🎪', section: 'Insights', permission: 'sidebar.events' },
   { id: 'settings',  label: 'White-Label Settings',  icon: '⚙️', section: 'System', permission: 'sidebar.settings' },
+  {
+    id: 'google-ads-test',
+    label: 'Google Ads (Test)',
+    section: 'System',
+    permission: 'sidebar.settings',
+    route: '/google-ads-test',
+    superAdminOnly: true,
+    logo: <GoogleAdsLogo size={18} />,
+  },
 ];

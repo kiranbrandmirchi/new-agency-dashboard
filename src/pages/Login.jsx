@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 const APP_NAME = import.meta.env.VITE_APP_NAME || 'Agency Dashboard';
@@ -7,6 +7,9 @@ const APP_NAME = import.meta.env.VITE_APP_NAME || 'Agency Dashboard';
 export function Login() {
   const { signIn } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const from = location.state?.from;
+  const returnTo = from?.pathname && from.pathname !== '/login' ? `${from.pathname}${from.search || ''}` : '/';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -19,7 +22,7 @@ export function Login() {
     try {
       const result = await signIn(email, password);
       if (result.success) {
-        navigate('/', { replace: true });
+        navigate(returnTo, { replace: true });
         return;
       }
       setError(result.error || 'Sign in failed');
