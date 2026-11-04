@@ -216,10 +216,15 @@ export function MonthlyReportEditor({ reportId, onBack }) {
       .filter((a) => a.platform === 'google_ads')
       .map((a) => a.platform_customer_id)
       .filter(Boolean);
-    return [...new Set([...fromReport, ...fromClient].map((id) => String(id).trim()).filter(Boolean))];
+    const customerIds = fromReport.length ? fromReport : fromClient;
+    return [...new Set(customerIds.map((id) => String(id).trim()).filter(Boolean))];
   }, [accounts, clientAccounts]);
 
   const googleAdsCustomerId = googleAdsCustomerIds[0] || '';
+  const auctionCustomerIds = useMemo(
+    () => (googleAdsCustomerId ? [googleAdsCustomerId] : []),
+    [googleAdsCustomerId],
+  );
 
   const loadAuctionFromSheets = useCallback(async ({ silent = false } = {}) => {
     const currentUrl = resolveAuctionSheetUrl('', auctionSheetUrl);
@@ -232,7 +237,7 @@ export function MonthlyReportEditor({ reportId, onBack }) {
         currentUrl,
         previousUrl,
         clientName,
-        { accessToken, customerIds: googleAdsCustomerIds },
+        { accessToken, customerIds: auctionCustomerIds },
       );
       const nextData = {
         current: { periodLabel: result.current.periodLabel, rows: result.current.rows },
@@ -240,8 +245,8 @@ export function MonthlyReportEditor({ reportId, onBack }) {
       };
       if (result.current.rows.length || result.previous.rows.length) {
         setSlide9data(nextData);
-        const idNote = googleAdsCustomerIds.length
-          ? ` (Customer ID ${googleAdsCustomerIds.join(', ')})`
+        const idNote = auctionCustomerIds.length
+          ? ` (Customer ID ${auctionCustomerIds.join(', ')})`
           : '';
         const curCount = result.current.rows.length;
         const prevCount = result.previous.rows.length;
@@ -260,7 +265,7 @@ export function MonthlyReportEditor({ reportId, onBack }) {
     } finally {
       setAuctionSheetLoading(false);
     }
-  }, [clientName, googleAdsCustomerIds, auctionSheetUrl, auctionSheetPreviousUrl, showNotification]);
+  }, [clientName, auctionCustomerIds, auctionSheetUrl, auctionSheetPreviousUrl, showNotification]);
 
   const buildExportPayload = useCallback(() => buildMonthlyExportData({
     report,
@@ -313,9 +318,9 @@ export function MonthlyReportEditor({ reportId, onBack }) {
       auctionSheetUrl,
       auctionSheetPreviousUrl,
       googleAdsCustomerId,
-      googleAdsCustomerIds,
+      googleAdsCustomerIds: auctionCustomerIds,
     },
-  }), [report, agency, sections, slide2, slide3, slide8, slide9data, slide9notes, slide10, seoExecutiveSections, compareSections, keywordTracker, keywordScreenshot, gbpNotes, gscNotes, webDevItems, backlinks, seoNextSteps, blogUpdates, gscSiteUrl, gbpLocationId, slideData, monthLabel, previousLabel, reportFrom, compareFrom, compareOn, auctionSheetUrl, auctionSheetPreviousUrl, googleAdsCustomerId, googleAdsCustomerIds]);
+  }), [report, agency, sections, slide2, slide3, slide8, slide9data, slide9notes, slide10, seoExecutiveSections, compareSections, keywordTracker, keywordScreenshot, gbpNotes, gscNotes, webDevItems, backlinks, seoNextSteps, blogUpdates, gscSiteUrl, gbpLocationId, slideData, monthLabel, previousLabel, reportFrom, compareFrom, compareOn, auctionSheetUrl, auctionSheetPreviousUrl, googleAdsCustomerId, googleAdsCustomerIds, auctionCustomerIds]);
 
   const handlers = useMemo(() => ({
     slide2, slide3, slide8, slide9data, slide9notes, slide10,

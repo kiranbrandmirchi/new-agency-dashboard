@@ -44,14 +44,20 @@ function customerIdMatches(rowCustomerId, customerIds) {
   return customerIds.some((id) => normCustomerId(id) === rowNorm);
 }
 
-function colIndex(headers, aliases) {
+function colIndex(headers, aliases, excludedTerms = []) {
   const h = headers.map((x) => normText(x));
+  const normalizedAliases = aliases.map((a) => normText(a));
+  const excluded = excludedTerms.map((term) => normText(term));
+  const isExcluded = (cell) => excluded.some((term) => cell.split(' ').includes(term));
+
+  for (let i = 0; i < h.length; i += 1) {
+    if (h[i] && !isExcluded(h[i]) && normalizedAliases.includes(h[i])) return i;
+  }
   for (let i = 0; i < h.length; i += 1) {
     const cell = h[i];
-    if (aliases.some((a) => {
-      const na = normText(a);
-      return cell === na || cell.includes(na) || na.includes(cell);
-    })) return i;
+    if (cell && !isExcluded(cell) && normalizedAliases.some((alias) => cell.includes(alias) || alias.includes(cell))) {
+      return i;
+    }
   }
   return -1;
 }
@@ -145,7 +151,7 @@ export function parseAuctionInsightsFromSheet(table, clientName, { customerId = 
     impressionShare: colIndex(headers, COL.impressionShare),
     overlapRate: colIndex(headers, COL.overlapRate),
     posAbove: colIndex(headers, COL.posAbove),
-    topPage: colIndex(headers, COL.topPage),
+    topPage: colIndex(headers, COL.topPage, ['abs', 'absolute']),
     absTop: colIndex(headers, COL.absTop),
     outranking: colIndex(headers, COL.outranking),
   };

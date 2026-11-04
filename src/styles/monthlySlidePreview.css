@@ -1192,6 +1192,40 @@
   font-size: 7px;
 }
 
+/*
+ * Editing slide 9: the sheet toolbar plus two tables do not fit a fixed 16:9 card,
+ * which clipped the table to the first ~3 rows. Let the card grow so every row shows.
+ * PDF/PPT export (non-editable) keeps the fixed 16:9 layout.
+ */
+.mr-slide-card--auction-edit {
+  aspect-ratio: auto;
+  height: auto;
+  min-height: 540px;
+  overflow: visible;
+}
+
+.mr-slide-card--auction-edit .mr-slide-inner,
+.mr-slide-card--auction-edit .mr-slide-main--auction,
+.mr-slide-card--auction-edit .mr-slide-auction-period,
+.mr-slide-card--auction-edit .mr-slide-table-wrap--auction-compact {
+  height: auto;
+  min-height: 0;
+  overflow: visible;
+}
+
+.mr-slide-card--auction-edit .mr-slide-auction-period {
+  flex: 0 0 auto;
+}
+
+.mr-slide-card--auction-edit .mr-slide-table-wrap--auction-compact {
+  flex: 0 0 auto;
+}
+
+.mr-slide-card--auction-edit .mr-slide-insight-box--auction {
+  max-height: none;
+  overflow: visible;
+}
+
 .mr-slide-table--auction-compact th,
 .mr-slide-table--auction-compact td {
   padding: 2px 4px;

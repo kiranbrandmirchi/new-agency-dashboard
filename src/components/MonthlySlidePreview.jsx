@@ -753,7 +753,7 @@ export function MonthlySlidePreview({
 }) {
   return (
     <div
-      className={`mr-slide-card${exportMode ? ' mr-slide-card--export' : ''}`}
+      className={`mr-slide-card${exportMode ? ' mr-slide-card--export' : ''}${editable && !exportMode && slideNum === 9 ? ' mr-slide-card--auction-edit' : ''}`}
       style={exportMode ? undefined : { animationDelay: `${index * 80}ms` }}
       data-slide-num={slideNum}
     >
